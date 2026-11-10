@@ -1,0 +1,38 @@
+id = "kackerx.agentpane"
+name = "Agent pane"
+version = "0.1.0"
+min_herdr_version = "0.9.5"
+description = "Right-hand panel for the focused Claude Code agent: context usage, project agents with avatars, and on/off switches for plugins, MCP servers and skills"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "toggle"
+title = "Agent pane: toggle the right-hand panel"
+contexts = ["workspace", "global"]
+command = ["python3", "toggle.py"]
+
+[[panes]]
+id = "panel"
+title = "Agent pane"
+placement = "split"
+command = ["python3", "panel.py"]
+
+# 浮窗编辑器: panel.py 里按回车 → 以 EDIT_FILE 环境变量传文件路径, nvim 退出浮窗跟着关 (popup 没有 pane id, 靠进程退出关闭)
+[[panes]]
+id = "editor"
+title = "Edit  ·  :wq save & close  ·  :q! discard"
+placement = "popup"  # overlay 会铺满整个 tab; popup 是不动布局的模态浮窗, 可设尺寸
+width = "80%"
+height = "80%"
+command = ["sh", "-c", "exec ${EDITOR:-nvim} \"$EDIT_FILE\""]
+
+# Agents 页点一下 agent → 浮窗里交互 (后台: claude attach <id>; 前台: herdr agent attach <pane>), 命令经 ATTACH_CMD 传入。
+# attach.py 是 pty 中转: ctrl+q q 关浮窗 (popup 吃掉所有键, 只能靠进程退出关)
+# title 是占位, panel.py 开窗前临时改成 agent 名 (herdr 浮窗标题只认清单, 开完还原)
+[[panes]]
+id = "attach"
+title = "agent  ·  ^q q close"
+placement = "popup"
+width = "80%"
+height = "80%"
+command = ["python3", "attach.py"]
