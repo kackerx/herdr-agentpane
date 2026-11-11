@@ -616,13 +616,29 @@ def launch_recall(cwd):
     os.execve(agmux, [agmux, "recall"], env)
 
 
+def theme_blue():
+    """herdr 给 done 用的颜色 = 主题的 blue 槽: 读 herdr config.toml 里自定义的 blue (没有就用 herdr 默认主题的 #89b4fa), 换成最近的 256 色"""
+    herdr_dir = os.path.dirname(os.path.dirname(os.path.dirname(CONF_DIR))) if os.environ.get("HERDR_PLUGIN_CONFIG_DIR") else os.path.join(HOME, ".config/herdr")
+    try:
+        with open(os.path.join(herdr_dir, "config.toml")) as f:
+            m = re.search(r'^\s*blue\s*=\s*"#([0-9a-fA-F]{6})"', f.read(), re.M)  # ponytail: 只认 [theme.custom] 的 blue; 换了别的内置主题仍按 catppuccin 的蓝
+    except OSError:
+        m = None
+    rgb = [int((m.group(1) if m else "89b4fa")[i:i + 2], 16) for i in (0, 2, 4)]
+    lv = (0, 95, 135, 175, 215, 255)
+    pal = {16 + 36 * a + 6 * b + c: (lv[a], lv[b], lv[c]) for a in range(6) for b in range(6) for c in range(6)}
+    pal.update({232 + i: (8 + 10 * i,) * 3 for i in range(24)})
+    return min(pal, key=lambda k: sum((x - y) ** 2 for x, y in zip(pal[k], rgb)))
+
+
 def main(scr):
     curses.set_escdelay(25)
     curses.curs_set(0)
     curses.use_default_colors()
-    for i, c in enumerate((curses.COLOR_GREEN, 208 if curses.COLORS > 208 else curses.COLOR_YELLOW, curses.COLOR_CYAN, curses.COLOR_RED), 1):
+    for i, c in enumerate((curses.COLOR_GREEN, 208 if curses.COLORS > 208 else curses.COLOR_YELLOW, curses.COLOR_CYAN, curses.COLOR_RED,
+                           theme_blue() if curses.COLORS >= 256 else curses.COLOR_BLUE), 1):
         curses.init_pair(i, c, -1)
-    GREEN, ORANGE, CYAN, RED = (curses.color_pair(i) for i in range(1, 5))
+    GREEN, ORANGE, CYAN, RED, BLUE = (curses.color_pair(i) for i in range(1, 6))
     curses.mousemask(curses.ALL_MOUSE_EVENTS)
     curses.mouseinterval(0)
     scr.keypad(True)
@@ -804,7 +820,7 @@ def main(scr):
 
         def card(y, r, on):
             """一张卡片 (agmux board 风格): 边框 + 头像槽 | 名字 / 分支·角色 / 模型 + 上下文条; 顶边框的标题是状态, 选中的是橙色双线框"""
-            stc = GREEN if r["status"] == "working" else curses.A_DIM if r["status"] in ("idle", "", "done") else RED
+            stc = GREEN if r["status"] == "working" else BLUE if r["status"] == "done" else curses.A_DIM if r["status"] in ("idle", "") else RED  # done 和 herdr 侧栏的圆点同色
             bc = (ORANGE | curses.A_BOLD) if on else stc
             tl, hz, tr, vt, bl, br = "╭─╮│╰╯"  # 选中和没选中都是圆角, 选中靠橙色加粗 + ❯ 区分 (Unicode 没有圆角双线)
             wid = w - 1  # 框占 0..w-2
@@ -861,7 +877,7 @@ def main(scr):
                 continue
             if kind == "agent":
                 extra = f"{r['src']} · {r['tok']}"
-                put(y, 2, "▪" if r["path"] else "▫", col(GREEN if r["path"] else curses.A_DIM))
+                put(y, 2, "●" if r["path"] else "○", col(GREEN if r["path"] else curses.A_DIM))
                 put(y, 5, r["name"], col(0 if r["path"] else curses.A_DIM))
                 put(y, w - len(extra) - 2, extra, col(curses.A_DIM))
                 continue
@@ -871,7 +887,7 @@ def main(scr):
                 extra = r["type"] + (f" {t_ / 1000:.1f}k" if t_ else "")
                 room = w - 7 - len(extra) - 2
                 shown = shown if len(shown) <= room else "…" + shown[len(shown) - room + 1:]
-                put(y, 2, "▪" if r["loaded"] else "▫", col(GREEN if r["loaded"] else curses.A_DIM))
+                put(y, 2, "●" if r["loaded"] else "○", col(GREEN if r["loaded"] else curses.A_DIM))
                 put(y, 5, shown, col(0 if r["loaded"] else curses.A_DIM))
                 put(y, w - len(extra) - 2, extra, col(curses.A_DIM))
                 continue
