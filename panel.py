@@ -582,6 +582,11 @@ def _rows(snap, u, tab, f):
     return [x for x in rows if x[0] == "text" and not f or f in (x[1][0] if x[0] == "text" else x[1].get("name") or x[1].get("path") or "").lower()]
 
 
+def has_handoff(cwd):
+    """有名为 handoff 的 skill (用户级或这个项目的 .claude/skills/handoff) 才给菜单项: /handoff 不是 Claude Code 内置命令"""
+    return any(os.path.isfile(os.path.join(d, ".claude/skills/handoff/SKILL.md")) for d in (HOME, cwd or ""))
+
+
 def agmux_bin():
     return shutil.which(os.environ.get("AGMUX_BIN") or "agmux")
 
@@ -994,8 +999,13 @@ def main(scr):
             elif kind == "skill":
                 m.toggle("skill", r)
 
+        def card_menu(r_):
+            """右键 / m 菜单的项: (nerd font 图标, 文字, 动作); Handoff 只给 herdr pane 里、装了 handoff skill 的 Claude 会话 (后台会话没法从外面发命令)"""
+            return [("\uf08e", "Open", "open"), ("\uf08d", "Unpin" if r_["pinned"] else "Pin", "pin"), ("\uf2bd", "Change avatar", "avatar")] + \
+                ([("\uf064", "Handoff", "handoff")] if r_.get("sid") and r_.get("pane") and has_handoff(r_["cwd"]) else []) + [("\uf00d", "Close agent", "close")]
+
         def card_action(what, idx):
-            """卡片上的动作 (键位和右键菜单共用): open / pin / avatar / close"""
+            """卡片上的动作 (键位和右键菜单共用): open / pin / avatar / handoff / close"""
             nonlocal picker, pending
             if not items or idx >= len(items) or items[idx][0] != "card":
                 return
@@ -1012,6 +1022,12 @@ def main(scr):
                     picker = {"ids": ids, "i": ids.index(r_.get("avatar")) if r_.get("avatar") in ids else 0, "top": 0, "name": r_["name"], "card": idx, "ncol": 5}
                 else:
                     m.say("✗ no avatar sets found (plugin avatars/ or config dir avatars/)")
+            elif what == "handoff":
+                def go(r_=r_):  # agent 忙时 herdr 会排队、等权限时拒绝, 不卡界面
+                    out = run(H, "agent", "prompt", r_["pane"], "/handoff")
+                    err = re.search(r'"message":"([^"]*)"', out)
+                    m.say("✗ " + (err.group(1) if err else "no response from herdr") if err or not out else "✓ /handoff sent to " + r_["name"])
+                threading.Thread(target=go, daemon=True).start()
             elif what == "close":
                 how = "stop this background session" if r_["bg"] else "close its herdr pane (ends the session)"
                 pending = (f"Close agent {r_['name']}: {how}? y = yes", lambda r_=r_: m.close_agent(r_))
@@ -1088,8 +1104,7 @@ def main(scr):
                 if T == "Agents" and my in hit and not picker:
                     sel[T] = hit[my]
                     r_ = items[sel[T]][1]
-                    menu = {"card": sel[T], "i": 0, "x": mx, "y": my, "items": [
-                        ("\uf08e", "Open", "open"), ("\uf08d", "Unpin" if r_["pinned"] else "Pin", "pin"), ("\uf2bd", "Change avatar", "avatar"), ("\uf00d", "Close agent", "close")]}
+                    menu = {"card": sel[T], "i": 0, "x": mx, "y": my, "items": card_menu(r_)}
             elif b & (curses.BUTTON1_PRESSED | curses.BUTTON1_CLICKED):  # 按下和释放贴得很近时 ncurses 合成 CLICKED 而不报 PRESSED
                 if picker:  # 头像框: 点格子 = 选中, 再点同一个 = 绑定; 点框外 = 关
                     bx, by, bw_, bh_ = picker.get("rect", (0, 0, 0, 0))
@@ -1179,8 +1194,7 @@ def main(scr):
             m.fetch_usage()
         elif c == "m" and T == "Agents" and items and items[sel[T]][0] == "card":
             r_ = items[sel[T]][1]
-            menu = {"card": sel[T], "i": 0, "x": 4, "y": body0 + (sel[T] - top[T]) * rowh + 2, "items": [
-                ("\uf08e", "Open", "open"), ("\uf08d", "Unpin" if r_["pinned"] else "Pin", "pin"), ("\uf2bd", "Change avatar", "avatar"), ("\uf00d", "Close agent", "close")]}
+            menu = {"card": sel[T], "i": 0, "x": 4, "y": body0 + (sel[T] - top[T]) * rowh + 2, "items": card_menu(r_)}
         elif c in ("t", "a", "x") and T == "Agents":
             card_action({"t": "pin", "a": "avatar", "x": "close"}[c], sel[T])
         elif c == "t" and T != "":

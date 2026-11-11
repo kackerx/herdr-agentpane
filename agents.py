@@ -119,7 +119,10 @@ _git = {}
 def repo_key(cwd):
     """同一个项目 = 同一个 git common dir (worktree 也算); 不在 git 里就是目录本身"""
     if cwd not in _git:
-        out = run("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        d = cwd
+        while d and not os.path.isdir(d) and os.path.dirname(d) != d:  # 进程所在目录被删了 (cd 进去后删掉): 按还在的上级算
+            d = os.path.dirname(d)
+        out = run("git", "-C", d, "rev-parse", "--path-format=absolute", "--git-common-dir").strip() if d else ""
         _git[cwd] = out or cwd
     return _git[cwd]
 
