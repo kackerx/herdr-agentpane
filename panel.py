@@ -38,7 +38,8 @@ EARLY = {}  # 启动时同步取一次 pane 信息 (见 __main__): 有没有 age
 AGMUX_URL = "https://github.com/kackerx/agmux"
 STATES = ("on", "name-only", "user-invocable-only", "off")  # skillOverrides 的四档, /skills 里空格也是按这个顺序轮转
 SHORT = {"user-invocable-only": "user-only"}
-os.environ["PATH"] = ":".join([os.environ.get("PATH", ""), "/opt/homebrew/bin", os.path.join(HOME, ".local/bin")])
+# herdr server 由 `herdr machine add` 经 ssh / launchd 拉起时 PATH 只有 /usr/bin:/bin, 找不到 claude / herdr / nvim: 补上常见位置, 浮窗也带过去 (--env PATH)
+os.environ["PATH"] = ":".join([os.environ.get("PATH", ""), "/opt/homebrew/bin", "/usr/local/bin", os.path.join(HOME, ".local/bin")])
 
 
 def run(*a, t=15):
@@ -488,7 +489,7 @@ class Model:
         if retitle:
             open(toml, "w").write(re.sub(r'(id = "attach"\ntitle = )"[^"]*"', lambda mm: mm.group(1) + '"' + title + '"', src))
         try:
-            out = run(H, "plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "attach", "--env", "ATTACH_CMD=" + cmd, "--focus")
+            out = run(H, "plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "attach", "--env", "ATTACH_CMD=" + cmd, "--env", "PATH=" + os.environ["PATH"], "--focus")
         finally:
             if retitle:
                 threading.Timer(1.5, lambda: open(toml, "w").write(src)).start()
@@ -510,7 +511,7 @@ class Model:
         if not path or not os.path.exists(path):
             self.say("✗ nothing to edit here (plugin / built-in items live outside your files)")
             return
-        out = run(H, "plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "editor", "--env", "EDIT_FILE=" + path, "--focus")  # 尺寸/popup 在清单里
+        out = run(H, "plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "editor", "--env", "EDIT_FILE=" + path, "--env", "PATH=" + os.environ["PATH"], "--focus")  # 尺寸/popup 在清单里
         self.say("✓ editing " + os.path.basename(path) if '"type":"ok"' in out.replace(" ", "") else "✗ failed to open the editor")
 
     def reload(self):
