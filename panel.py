@@ -730,8 +730,14 @@ def main(scr):
         stext = ("/" + flt[T] + ("█" if typing else "")) if (flt[T] or typing) else status
         slines = textwrap.wrap(stext, max(10, w - 5))[:3] if stext else []  # 状态/提示放到底部的 tips 框里, 太长折行 (最多 3 行)
         box_h = len(slines) + 2 if slines and h >= 14 else 0
-        body0 = 4
-        body_h = max(1, h - 8 - box_h)  # 头 1 + 分割线 + 页签 + 分割线 | tips 框 + 底部 分割线 + 按钮 + 说明 2 行
+        # 页签: 每个一个圆角框, 等宽网格排, 放不下一行就折行 (窄面板 5 个页签也都看得见)
+        cnts = {"Plugin": sum(r["on"] for r in snap.get("plugins", [])), "MCP": len(snap.get("mcp", [])), "Skills": len(snap.get("skills", [])), "Agents": len(snap.get("agents", [])), "Context": len(snap.get("files", [])) + len((u or {}).get("tables", {}).get("Custom Agents") or [])}
+        tlabels = [f"{n}{'' if cnts.get(n) is None else ' ' + str(cnts[n])}" for n in TABS]
+        tcols = max(1, min(len(TABS), (w - 1) // (max(map(len, tlabels)) + 4)))  # 框 2 列 + 两边各留 1 格
+        trows = -(-len(TABS) // tcols)
+        tx_ = [c * (w - 1) // tcols for c in range(tcols + 1)]  # 列边界: 余数摊到各列, 最右一列的框和卡片右边框对齐
+        body0 = 1 + 3 * trows + 1  # 头 1 行 + 页签框 (每行 3 行高) + 分割线
+        body_h = max(1, h - body0 - 4 - box_h)  # 底下: tips 框 + 分割线 + 按钮 + 说明 2 行
         rowh = 5 if T == "Agents" else 1  # Agents 页一张卡: 上边框 + 3 行内容 + 下边框
         vis = max(1, body_h // rowh)  # 一屏能放几项
         av_cells.clear()
@@ -788,18 +794,21 @@ def main(scr):
             put(y, 0, "─" * w, curses.A_DIM)
             if text:
                 put(y, 2, " " + text + " ", a)
-        sep(1)
-        # 页签: 当前页反色; 点击切页
-        tab_hits, x = [], 1
-        for i, name in enumerate(TABS):
-            cnt = {"Plugin": sum(r["on"] for r in snap.get("plugins", [])), "MCP": len(snap.get("mcp", [])), "Skills": len(snap.get("skills", [])), "Agents": len(snap.get("agents", [])), "Context": len(snap.get("files", [])) + len((u or {}).get("tables", {}).get("Custom Agents") or [])}.get(name)
-            label = f" {name}{'' if cnt is None else ' ' + str(cnt)} "
-            put(2, x, label, (curses.A_REVERSE | curses.A_BOLD | ORANGE) if i == tab else curses.A_DIM)
-            tab_hits.append((x, x + len(label), i))
-            x += len(label)
+        # 页签框: 当前页橙色加粗框 + 反色字 (和选中卡片一个语言); 点框里任意位置切页
+        tab_hits = []
+        for i, label in enumerate(tlabels):
+            ty, tx, tcw = 1 + 3 * (i // tcols), tx_[i % tcols], tx_[i % tcols + 1] - tx_[i % tcols]
+            on_ = i == tab
+            bc = (ORANGE | curses.A_BOLD) if on_ else curses.A_DIM
+            put(ty, tx, "╭" + "─" * (tcw - 2) + "╮", bc)
+            put(ty + 1, tx, "│", bc)
+            put(ty + 1, tx + 1, label.center(tcw - 2), (curses.A_REVERSE | curses.A_BOLD | ORANGE) if on_ else 0)
+            put(ty + 1, tx + tcw - 1, "│", bc)
+            put(ty + 2, tx, "╰" + "─" * (tcw - 2) + "╯", bc)
+            tab_hits.append((ty, tx, tcw, i))
         busy = m.usage["busy"]
         sattr = CYAN if (flt[T] or typing) else GREEN if status.startswith("✓") else RED if status.startswith("✗") else curses.A_DIM
-        sep(3)
+        sep(body0 - 1)
         hit = {}
         tick = int(time.time() * 2)  # 头像动画: 每 0.5 秒换一帧
 
@@ -1151,8 +1160,8 @@ def main(scr):
                 bt = next((x for x in btns if my == x[0] and x[1] <= mx < x[1] + x[2]), None)
                 if bt:
                     m.reload() if bt[3] == "reload" else m.fetch_usage()
-                elif my == 2:
-                    t_ = next((x[2] for x in tab_hits if x[0] <= mx < x[1]), None)
+                elif 1 <= my < body0 - 1:
+                    t_ = next((x[3] for x in tab_hits if x[0] <= my < x[0] + 3 and x[1] <= mx < x[1] + x[2]), None)
                     if t_ is not None:
                         go_tab(t_)
                 elif my in hit:
