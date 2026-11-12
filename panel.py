@@ -741,14 +741,15 @@ def main(scr):
         # 页签: 每个一个圆角框, 等宽网格排, 放不下一行就折行 (窄面板 5 个页签也都看得见)
         cnts = {"Plugin": sum(r["on"] for r in snap.get("plugins", [])), "MCP": len(snap.get("mcp", [])), "Skills": len(snap.get("skills", [])), "Agents": len(snap.get("agents", [])), "Context": len(snap.get("files", [])) + len((u or {}).get("tables", {}).get("Custom Agents") or [])}
         tlabels = [f"{n}{'' if cnts.get(n) is None else ' ' + str(cnts[n])}" for n in TABS]
-        tpos, tx, ty = [], 1, 1  # 页签 = 一行高的圆头胶囊 (nerd font 的半圆头), 按内容宽度从左往右排, 排不下就折行
-        for label in tlabels:
-            tw = len(label) + 4  # 左右半圆头各 1 + 字两边各 1 空格
-            if tx > 1 and tx + tw > w - 1:
-                tx, ty = 1, ty + 1
-            tpos.append((ty, tx, tw))
-            tx += tw + 1
-        body0 = ty + 2  # 头 1 行 + 页签行 + 分割线
+        # 页签 = 一行高的圆头胶囊, 等宽网格 (一行放得下几个完整的就几个, 最少 3 个), 列和下面卡片的左右边对齐, 行与行之间空一行
+        gap, span = 2, w - 1
+        tcols = next((c for c in (5, 4) if c * (max(map(len, tlabels)) + 4) + (c - 1) * gap <= span), 3)
+        edge = [c * (span + gap) // tcols for c in range(tcols + 1)]
+        tpos = [(2 + 2 * (k // tcols), edge[k % tcols], edge[k % tcols + 1] - edge[k % tcols] - gap) for k in range(len(TABS))]
+        room = min(tw_ for _, _, tw_ in tpos) - 2  # 两头半圆各 1; 字两边的空格是居中剩下的
+        if any(len(lb) > room for lb in tlabels):  # 有一个放不下数字就全都只留名字 (一致), 再放不下截断
+            tlabels = [n_ if len(n_) <= room else n_[:max(1, room - 1)] + "…" for n_ in TABS]
+        body0 = tpos[-1][0] + 2  # 头 + 分割线 + 页签行 (中间空行) + 分割线
         body_h = max(1, h - body0 - 4 - box_h)  # 底下: tips 框 + 分割线 + 按钮 + 说明 2 行
         rowh = 5 if T == "Agents" else 1  # Agents 页一张卡: 上边框 + 3 行内容 + 下边框
         vis = max(1, body_h // rowh)  # 一屏能放几项
@@ -790,7 +791,7 @@ def main(scr):
         if s:
             pc = re.search(r"\((\d+)%\)", (u or {}).get("tokens", ""))
             pct = m.ctx if m.ctx is not None else int(pc[1]) if pc else None
-            bar = f"{'▰' * round(pct / 10):▱<10} {pct}%" if pct is not None else ""
+            bar = f"{'▰' * round(pct / 10):▱<10}" if pct is not None else ""  # 只留条, 百分数太挤
             name = s.get("name") or s["sessionId"][:8]
             put(0, 1, name, curses.A_BOLD | ORANGE)
             room = w - 2 - len(bar) - (2 if bar else 0)  # 目录放名字后面, 占用条贴右边; 目录太长从左边截
@@ -806,12 +807,13 @@ def main(scr):
             put(y, 0, "─" * w, curses.A_DIM)
             if text:
                 put(y, 2, " " + text + " ", a)
+        sep(1)
         # 当前页 = 橙底胶囊, 其它 = 灰底; 点胶囊切页
         tab_hits = []
         for i, (label, (ty, tx, tw)) in enumerate(zip(tlabels, tpos)):
             cap, body = (PILL_ON_CAP, PILL_ON) if i == tab else (PILL_CAP, PILL)
             put(ty, tx, "\ue0b6", cap)
-            put(ty, tx + 1, f" {label} ", body | (curses.A_BOLD if i == tab else 0))
+            put(ty, tx + 1, label.center(tw - 2), body | (curses.A_BOLD if i == tab else 0))
             put(ty, tx + tw - 1, "\ue0b4", cap)
             tab_hits.append((ty, tx, tw, i))
         busy = m.usage["busy"]
