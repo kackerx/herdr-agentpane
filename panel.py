@@ -741,15 +741,23 @@ def main(scr):
         # 页签: 每个一个圆角框, 等宽网格排, 放不下一行就折行 (窄面板 5 个页签也都看得见)
         cnts = {"Plugin": sum(r["on"] for r in snap.get("plugins", [])), "MCP": len(snap.get("mcp", [])), "Skills": len(snap.get("skills", [])), "Agents": len(snap.get("agents", [])), "Context": len(snap.get("files", [])) + len((u or {}).get("tables", {}).get("Custom Agents") or [])}
         tlabels = [f"{n}{'' if cnts.get(n) is None else ' ' + str(cnts[n])}" for n in TABS]
-        # 页签 = 一行高的圆头胶囊, 等宽网格 (一行放得下几个完整的就几个, 最少 3 个), 列和下面卡片的左右边对齐, 行与行之间空一行
-        gap, span = 2, w - 1
-        tcols = next((c for c in (5, 4) if c * (max(map(len, tlabels)) + 4) + (c - 1) * gap <= span), 3)
-        edge = [c * (span + gap) // tcols for c in range(tcols + 1)]
-        tpos = [(2 + 2 * (k // tcols), edge[k % tcols], edge[k % tcols + 1] - edge[k % tcols] - gap) for k in range(len(TABS))]
-        room = min(tw_ for _, _, tw_ in tpos) - 2  # 两头半圆各 1; 字两边的空格是居中剩下的
-        if any(len(lb) > room for lb in tlabels):  # 有一个放不下数字就全都只留名字 (一致), 再放不下截断
-            tlabels = [n_ if len(n_) <= room else n_[:max(1, room - 1)] + "…" for n_ in TABS]
-        body0 = tpos[-1][0] + 2  # 头 + 分割线 + 页签行 (中间空行) + 分割线
+        # 页签 = 一行高的圆头胶囊, 排成列对齐的网格, 整体和下面卡片的左右边对齐。列数: 5 / 4 / 3 里放得下的最多的 (先试带数字, 再试只有名字);
+        # 每列先取本列最长的字 + 两头半圆, 剩下的宽度一格一格补给最窄的列 (尽量等宽)
+        gap, span = 1, w - 1
+        for tcols, tlabels_ in ((c, lb) for c in (5, 4, 3) for lb in (tlabels, list(TABS))):
+            nat = [max(len(tlabels_[k]) + 2 for k in range(j_, len(TABS), tcols)) for j_ in range(tcols)]
+            if sum(nat) + (tcols - 1) * gap <= span:
+                break
+        tlabels = tlabels_
+        cw = list(nat)
+        for _ in range(max(0, span - sum(cw) - (tcols - 1) * gap)):
+            cw[cw.index(min(cw))] += 1
+        if sum(cw) + (tcols - 1) * gap > span:  # 3 列只放名字都不够 (极窄): 均分后截断
+            cw = [(span - (tcols - 1) * gap) // tcols] * tcols
+            tlabels = [n_ if len(n_) <= cw[0] - 2 else n_[:max(1, cw[0] - 3)] + "…" for n_ in TABS]
+        cx = [sum(cw[:j_]) + j_ * gap for j_ in range(tcols)]
+        tpos = [(2 + k // tcols, cx[k % tcols], cw[k % tcols]) for k in range(len(TABS))]
+        body0 = tpos[-1][0] + 2  # 头 + 分割线 + 页签行 + 分割线
         body_h = max(1, h - body0 - 4 - box_h)  # 底下: tips 框 + 分割线 + 按钮 + 说明 2 行
         rowh = 5 if T == "Agents" else 1  # Agents 页一张卡: 上边框 + 3 行内容 + 下边框
         vis = max(1, body_h // rowh)  # 一屏能放几项
@@ -795,7 +803,7 @@ def main(scr):
             name = s.get("name") or s["sessionId"][:8]
             put(0, 1, name, curses.A_BOLD | ORANGE)
             room = w - 2 - len(bar) - (2 if bar else 0)  # 目录放名字后面, 占用条贴右边; 目录太长从左边截
-            cwd = snap["cwd"].replace(HOME, "~")
+            cwd = os.path.basename(snap["cwd"].rstrip("/")) or "/"  # 只显示最后一级目录
             left = room - len(name) - 2
             if left >= 4:
                 put(0, 3 + len(name), cwd if len(cwd) <= left else "…" + cwd[len(cwd) - left + 1:], curses.A_DIM)
