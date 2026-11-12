@@ -750,13 +750,17 @@ def main(scr):
                 break
         tlabels = tlabels_
         cw = list(nat)
-        for _ in range(max(0, span - sum(cw) - (tcols - 1) * gap)):
-            cw[cw.index(min(cw))] += 1
+        extra = max(0, span - sum(cw) - (tcols - 1) * gap)
+        for _ in range(extra // 2):  # 两格两格地补: 字两边的空格保持一样宽 (补 1 格会让字偏半格)
+            cw[cw.index(min(cw))] += 2
+        gaps = [gap] * (tcols - 1)
+        if extra % 2 and gaps:  # 剩的 1 格放进最后一个间隙, 右边照样和卡片对齐
+            gaps[-1] += 1
         if sum(cw) + (tcols - 1) * gap > span:  # 3 列只放名字都不够 (极窄): 均分后截断
             cw = [(span - (tcols - 1) * gap) // tcols] * tcols
             tlabels = [n_ if len(n_) <= cw[0] - 2 else n_[:max(1, cw[0] - 3)] + "…" for n_ in TABS]
-        cx = [sum(cw[:j_]) + j_ * gap for j_ in range(tcols)]
-        tpos = [(2 + k // tcols, cx[k % tcols], cw[k % tcols]) for k in range(len(TABS))]
+        cx = [sum(cw[:j_]) + sum(gaps[:j_]) for j_ in range(tcols)]
+        tpos = [(2 + 2 * (k // tcols), cx[k % tcols], cw[k % tcols]) for k in range(len(TABS))]  # 行与行之间空一行 (贴着看不出是两个)
         body0 = tpos[-1][0] + 2  # 头 + 分割线 + 页签行 + 分割线
         body_h = max(1, h - body0 - 4 - box_h)  # 底下: tips 框 + 分割线 + 按钮 + 说明 2 行
         rowh = 5 if T == "Agents" else 1  # Agents 页一张卡: 上边框 + 3 行内容 + 下边框
@@ -821,7 +825,8 @@ def main(scr):
         for i, (label, (ty, tx, tw)) in enumerate(zip(tlabels, tpos)):
             cap, body = (PILL_ON_CAP, PILL_ON) if i == tab else (PILL_CAP, PILL)
             put(ty, tx, "\ue0b6", cap)
-            put(ty, tx + 1, label.center(tw - 2), body | (curses.A_BOLD if i == tab else 0))
+            pad = tw - 2 - len(label)
+            put(ty, tx + 1, " " * (pad // 2) + label + " " * (pad - pad // 2), body | (curses.A_BOLD if i == tab else 0))  # str.center 的奇数余量有时放左边, 统一放右边
             put(ty, tx + tw - 1, "\ue0b4", cap)
             tab_hits.append((ty, tx, tw, i))
         busy = m.usage["busy"]
