@@ -454,7 +454,7 @@ class Model:
 
     def refresh_agents(self):
         cwd = self.pane_cwd or (self.sess or {}).get("cwd") or os.getcwd()
-        self.agents = AG.fetch(cwd, H)
+        self.agents = AG.fetch(cwd, H, os.environ.get("HERDR_WORKSPACE_ID"))
         with self.lock:
             self.snap = dict(self.snap, agents=self.agents)
 

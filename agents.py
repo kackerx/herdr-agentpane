@@ -127,6 +127,16 @@ def repo_key(cwd):
     return _git[cwd]
 
 
+def tree_key(cwd):
+    """同一个 worktree = 同一个 git 顶层目录 (repo_key 是整个仓库, 各 worktree 算一个); 不在 git 里就是目录本身"""
+    if ("tree", cwd) not in _git:
+        d = cwd
+        while d and not os.path.isdir(d) and os.path.dirname(d) != d:
+            d = os.path.dirname(d)
+        _git[("tree", cwd)] = (run("git", "-C", d, "rev-parse", "--show-toplevel").strip() if d else "") or cwd
+    return _git[("tree", cwd)]
+
+
 def branch_of(cwd):
     return run("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD", t=3).strip()
 
@@ -186,10 +196,14 @@ def transcript_stats(sid, cwd):
     return out
 
 
-def fetch(cwd, herdr_bin="herdr"):
-    """当前项目 (cwd 所在的仓库) 的 agent: 前台在前、后台在后, 各自置顶的在最前。
-    前台的带 herdr pane id (点了跳过去); 后台的带 attach 用的短 id"""
-    key = repo_key(cwd)
+def fetch(cwd, herdr_bin="herdr", workspace=None):
+    """面板所在 herdr workspace 里的 agent + 同一个 worktree 里不在 herdr pane 里的会话 (后台 / 别的终端里开的)。
+    前台在前、后台在后, 各自置顶的在最前。前台的带 herdr pane id (点了跳过去); 后台的带 attach 用的短 id。
+    不传 workspace (面板拿不到) 就只按 worktree 算"""
+    tree = tree_key(cwd)
+
+    def mine(a, c):  # 在 herdr pane 里: 按 workspace; 不在: 按 worktree
+        return a.get("workspace_id") == workspace if a and workspace else tree_key(c or "") == tree
     panes, herd = {}, []
     try:
         herd = json.loads(run(herdr_bin, "agent", "list") or "{}")["result"].get("agents", [])
@@ -208,19 +222,21 @@ def fetch(cwd, herdr_bin="herdr"):
     except ValueError:
         sessions = []
     for s in sessions:
-        if not s.get("cwd") or repo_key(s["cwd"]) != key:
+        if not s.get("cwd"):
             continue
         bg = s.get("kind") == "background"
         name = s.get("name") or (s.get("sessionId") or "")[:8]
+        a = None if bg else panes.get((name, s["cwd"])) or panes.get((name, repo_key(s["cwd"])))
+        if not mine(a, s["cwd"]):
+            continue
         r = dict(id=s.get("id") or s.get("sessionId"), sid=s.get("sessionId"), name=name, cwd=s["cwd"], bg=bg,
                  status=STATUS.get(s.get("status"), s.get("status") or ""), model="", ctx=-1, role="", pane=None, tab=None)
-        a = None if bg else panes.get((name, s["cwd"])) or panes.get((name, key))
         if a:
             used.add(a["pane_id"])
             r.update(pane=a["pane_id"], tab=a.get("tab_id"), status=a.get("agent_status") or r["status"])
         rows.append((r, a))
     for a in herd:  # herdr 里有、claude 列表里没有的 (别的 agent, 比如 pi)
-        if "_name" in a and a["pane_id"] not in used and a["_name"] not in {r["name"] for r, _ in rows} and repo_key(a.get("cwd") or "") == key:
+        if "_name" in a and a["pane_id"] not in used and a["_name"] not in {r["name"] for r, _ in rows} and mine(a, a.get("cwd")):
             rows.append((dict(id=a["pane_id"], sid=None, name=a["_name"], cwd=a.get("cwd"), bg=False, status=a.get("agent_status") or "",
                               model="", ctx=-1, role="", pane=a["pane_id"], tab=a.get("tab_id")), a))
     pins, avail = jload(PINS_JSON), sets()

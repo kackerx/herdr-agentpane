@@ -6,7 +6,7 @@ A [herdr](https://herdr.dev) plugin: a panel on the right edge of the tab for th
 | Page | What it shows / does |
 |---|---|
 | **Context** | context usage by category (headless `/context`, no API call), the agent's memory and instruction files — `enter` edits one in a popup |
-| **Agents** | every agent of the current project, foreground and background, as cards with avatars (kitty graphics), status, branch, model and context bar. Click once to select, again to open: an agent in this tab gets focus, any other opens in a popup (`ctrl+q q` closes it). `t` pin, `a` change avatar, `x` stop, right click / `m` menu (also **Handoff**: sends `/handoff` to a foreground Claude Code agent when a `handoff` skill is installed) |
+| **Agents** | the agents of this herdr workspace, plus background or out-of-herdr sessions in the same worktree, as cards with avatars (kitty graphics), status, branch, model and context bar. Click once to select, again to open: an agent in this tab gets focus, any other opens in a popup (`ctrl+q q` closes it). `t` pin, `a` change avatar, `x` stop, right click / `m` menu (also **Handoff**: sends `/handoff` to a foreground Claude Code agent when a `handoff` skill is installed) |
 | **Plugin** | Claude Code plugins: toggle per project, `D` uninstall, `U` update, `r` reload |
 | **MCP** | MCP servers of the session: toggled with `/mcp enable` / `/mcp disable` |
 | **Skills** | skills: `space` cycles on → name-only → user-only → off, `enter` edits `SKILL.md` |
