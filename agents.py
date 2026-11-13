@@ -197,13 +197,14 @@ def transcript_stats(sid, cwd):
 
 
 def fetch(cwd, herdr_bin="herdr", workspace=None):
-    """面板所在 herdr workspace 里的 agent + 同一个 worktree 里不在 herdr pane 里的会话 (后台 / 别的终端里开的)。
+    """面板所在 herdr workspace 里的 agent + 不在 herdr pane 里的会话 (后台 / 别的终端里开的), 后者只要它的 worktree 是这个
+    workspace 里某个 agent 的 worktree (或面板自己的) 就算这个 workspace 的 (后台会话本身不属于任何 workspace)。
     前台在前、后台在后, 各自置顶的在最前。前台的带 herdr pane id (点了跳过去); 后台的带 attach 用的短 id。
     不传 workspace (面板拿不到) 就只按 worktree 算"""
-    tree = tree_key(cwd)
+    trees = {tree_key(cwd)}
 
     def mine(a, c):  # 在 herdr pane 里: 按 workspace; 不在: 按 worktree
-        return a.get("workspace_id") == workspace if a and workspace else tree_key(c or "") == tree
+        return a.get("workspace_id") == workspace if a and workspace else tree_key(c or "") in trees
     panes, herd = {}, []
     try:
         herd = json.loads(run(herdr_bin, "agent", "list") or "{}")["result"].get("agents", [])
@@ -216,6 +217,7 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         a["_name"] = tk.get("name") or a.get("terminal_title_stripped") or a.get("agent") or a["pane_id"]
         panes[(a["_name"], a.get("cwd"))] = a
         panes.setdefault((a["_name"], repo_key(a.get("cwd") or "")), a)  # herdr 报进程当前 cwd (会话里 cd 过就变), claude 报启动目录: 退到同仓库同名
+    trees |= {tree_key(a.get("cwd") or "") for a in herd if workspace and a.get("workspace_id") == workspace and a.get("cwd")}
     rows, used = [], set()
     try:
         sessions = json.loads(run("claude", "agents", "--json", t=20) or "[]")
