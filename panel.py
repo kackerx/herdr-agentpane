@@ -199,16 +199,39 @@ def skill_src(name, cwd):
     return "built-in", None
 
 
+def project_conf(cj, cwd):
+    """~/.claude.json 里这个项目的那一项。Claude Code 对 git worktree 记在【主仓库根目录】下 (实测: worktree 里 /mcp disable
+    写进的是 .../doraemon 而不是 .../doraemon.worktrees/hotfix/x), 所以依次试 cwd、真实路径、worktree 顶层、主仓库根"""
+    common = AG.repo_key(cwd)
+    keys = [cwd, os.path.realpath(cwd), AG.tree_key(cwd)] + ([os.path.dirname(common)] if common.endswith("/.git") else [])
+    projects = cj.get("projects") or {}
+    return next((projects[k] for k in keys if k in projects), {})
+
+
+def catalog():
+    """可按项目打开的 MCP 目录 (配置目录的 mcp.json, 和 .mcp.json 同格式; 字符串里的 ~ / $HOME 会展开): 不在用户级, 默认不加载"""
+    return jload(os.path.join(CONF_DIR, "mcp.json")).get("mcpServers") or {}
+
+
+def expand(v):
+    if isinstance(v, str):
+        return os.path.expandvars(os.path.expanduser(v))
+    if isinstance(v, dict):
+        return {k: expand(x) for k, x in v.items()}
+    return [expand(x) for x in v] if isinstance(v, list) else v
+
+
 def mcp_rows(tx, cwd):
     cj = jload(CLAUDE_JSON)
-    proj = (cj.get("projects") or {}).get(cwd) or (cj.get("projects") or {}).get(os.path.realpath(cwd)) or {}
+    proj = project_conf(cj, cwd)
+    cat = catalog()
     local = jload(sfiles(cwd)[2])
     off = set(proj.get("disabledMcpServers") or []) | set(proj.get("disabledMcpjsonServers") or []) | set(local.get("disabledMcpjsonServers") or [])
     known = set(tx.real) | set(cj.get("mcpServers") or {}) | set(proj.get("mcpServers") or {}) | set((jload(os.path.join(cwd, ".mcp.json")).get("mcpServers") or {}))
     by_norm = {norm(k): k for k in known}
     counts = Counter(t.split("__")[1] for t in tx.tools if t.count("__") >= 2)
     rows = {by_norm.get(n) or guess_real(n): c for n, c in counts.items()}
-    for k in known | off:
+    for k in known | off | set(cat):
         rows.setdefault(k, 0)
     def scope(k):  # claude mcp remove -s 用的作用域名; 其它来源 (插件 / claude.ai 连接器) 不能删
         if k in (cj.get("mcpServers") or {}):
@@ -217,8 +240,12 @@ def mcp_rows(tx, cwd):
             return "local"
         if k in (jload(os.path.join(cwd, ".mcp.json")).get("mcpServers") or {}):
             return "project"
-        return "plugin" if k.startswith("plugin:") else "claude.ai" if k.startswith("claude.ai") else "?"
-    return sorted(({"name": k, "tools": c, "on": k not in off, "scope": scope(k)} for k, c in rows.items()), key=lambda r: (not r["on"], r["name"].lower()))
+        return "catalog" if k in cat else "plugin" if k.startswith("plugin:") else "claude.ai" if k.startswith("claude.ai") else "?"
+    out = []
+    for k, c in rows.items():
+        sc = scope(k)
+        out.append({"name": k, "tools": c, "on": k not in off and sc != "catalog", "scope": sc, "catalog": k in cat, "disabled": k in off})
+    return sorted(out, key=lambda r: (not r["on"], r["name"].lower()))
 
 
 def plugin_rows(tx, cwd):
@@ -369,12 +396,17 @@ class Model:
         with self.lock:
             self.status, self.status_ts = s, time.time()
 
-    def agent_cmd(self, cmd, ok):
-        """给 agent 发一条斜杠命令 (后台线程里调, 不卡界面)"""
+    def agent_cmd(self, cmd, ok, fail="", then=None):
+        """给 agent 发一条斜杠命令 (后台线程里调, 不卡界面)。agent 在等你回答 (blocked: 权限 / 提问) 时 herdr 发不进去, 先说清楚"""
         def go():
+            if '"agent_status":"blocked"' in run(H, "agent", "get", TARGET).replace(" ", ""):
+                self.say(f"✗ {cmd} not sent: the agent is waiting for your answer (permission / question) — answer it, then retry" + fail)
+                return
             out = run(H, "agent", "prompt", TARGET, cmd)
             err = re.search(r'"message":"([^"]*)"', out)
-            self.say("✗ " + (err.group(1) if err else "no response from herdr") if err or not out else ok)
+            self.say("✗ " + (err.group(1) if err else "no response from herdr") + fail if err or not out else ok)
+            if then and out and not err:  # 下一条等这条发完再发, 免得顺序乱
+                then()
             self.stale = True
             self.refresh(False)
         threading.Thread(target=go, daemon=True).start()
@@ -383,6 +415,24 @@ class Model:
         cwd = self.snap.get("cwd")
         if kind == "mcp":
             name, on = row["name"], row["on"]
+            if row.get("catalog") and (row["scope"] == "catalog" or row["scope"] == "local" and on):
+                # 目录里的: 开 = 加成本项目 (local) 的配置, 关 = 删掉它; 都再 /reload-plugins (实测它会重读 MCP 配置, 新加的 local 服务器当场出现)
+                add = row["scope"] == "catalog"
+                cmd = ["claude", "mcp", "add-json", "-s", "local", name, json.dumps(expand(catalog().get(name) or {}))] if add else ["claude", "mcp", "remove", "-s", "local", name]
+
+                def go():
+                    try:
+                        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=cwd)
+                    except Exception as e:
+                        return self.say("✗ " + str(e)[:60])
+                    if r.returncode:
+                        return self.say("✗ " + ((r.stderr or r.stdout).strip().split("\n")[-1][:60] or "claude mcp failed"))
+                    # 以前在本项目 /mcp disable 过的: 那条记录还在, 加回来也是关的, reload 之后再 enable 一次
+                    again = (lambda: self.agent_cmd(f"/mcp enable {name}", f"✓ {name} on in this project")) if add and row["disabled"] else None
+                    self.agent_cmd("/reload-plugins", f"✓ {name} {'on' if add else 'off'} in this project", " · config saved, press r once the agent is free", again)
+                self.say(f"… {'adding' if add else 'removing'} {name} for this project")
+                threading.Thread(target=go, daemon=True).start()
+                return
             self.say(f"… /mcp {'disable' if on else 'enable'} {name}")
             self.agent_cmd(f"/mcp {'disable' if on else 'enable'} {name}", f"✓ {name} {'disabled' if on else 'enabled'}")
         elif kind == "plugin":

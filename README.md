@@ -61,6 +61,11 @@ Press it again (or `q` in the panel) to close.
 - `width`: inner width in columns, or a share of the tab such as `"30%"`
 - `remember`: after you drag the panel wider or narrower it reopens at that width; `false` always uses `width`
 
+MCP servers you want only in some projects go in `mcp.json` in the same directory (same shape as `.mcp.json`;
+`~` and `$HOME` in strings are expanded). They are not loaded anywhere by default; the MCP page lists them as
+`catalog`, and switching one on adds it to that project (`claude mcp add-json -s local`) and reloads, switching it
+off removes it again.
+
 Your own avatar sets go in `avatars/<id>/{idle,think,hi}/*.png` under the same directory and take precedence
 over the bundled ones with the same id.
 
