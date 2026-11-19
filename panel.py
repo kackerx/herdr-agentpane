@@ -698,7 +698,10 @@ def main(scr):
         PILL_ON, PILL_ON_CAP, PILL, PILL_CAP = (curses.color_pair(i) for i in range(6, 10))
     else:
         PILL_ON, PILL_ON_CAP, PILL, PILL_CAP = curses.A_REVERSE | ORANGE, ORANGE, curses.A_REVERSE, 0
-    curses.mousemask(curses.ALL_MOUSE_EVENTS)
+    # 系统自带的 ncurses 6.0 (2015) 是 mouse v1: 没有 BUTTON5, 滚轮往下报成 REPORT_MOUSE_POSITION, 不放进 mask 就整个丢掉 (只能往上滚的原因)。
+    # 终端只开了 1000 模式 (按键事件, 不报移动), 所以这个位只会是滚轮下
+    curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
+    WHEEL_DOWN = getattr(curses, "BUTTON5_PRESSED", 0) or curses.REPORT_MOUSE_POSITION
     curses.mouseinterval(0)
     scr.keypad(True)
     scr.timeout(250)
@@ -1195,10 +1198,10 @@ def main(scr):
                 _, mx, my, _, b = curses.getmouse()
             except curses.error:
                 continue
-            if b & getattr(curses, "BUTTON4_PRESSED", 0):
-                sel[T] = max(0, sel[T] - 3)
-            elif b & getattr(curses, "BUTTON5_PRESSED", 0):
-                sel[T] += 3
+            if b & (curses.BUTTON4_PRESSED | WHEEL_DOWN):  # 滚轮 = 像网页一样滚内容, 选中跟着留在可见范围里
+                top[T] = max(0, min(top[T] + (-3 if b & curses.BUTTON4_PRESSED else 3), max(0, len(items) - vis)))
+                sel[T] = min(max(sel[T], top[T]), top[T] + vis - 1, max(0, len(items) - 1))
+                psel[T] = sel[T]
             elif b & (curses.BUTTON3_PRESSED | curses.BUTTON3_CLICKED | curses.BUTTON3_RELEASED):  # 右键: 卡片上弹菜单
                 if T == "Agents" and my in hit and not picker:
                     sel[T] = hit[my]
