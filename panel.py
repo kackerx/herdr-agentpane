@@ -144,11 +144,18 @@ def find_session():
     info = (json.loads(run(H, "pane", "process-info", "--pane", TARGET) or "{}").get("result") or {}).get("process_info") or {}
     pids = {p.get("pid") for p in info.get("foreground_processes") or []}
     try:
-        for s in json.loads(run("claude", "agents", "--json") or "[]"):
-            if s.get("kind") == "interactive" and s.get("pid") in pids:
-                return s
+        sessions = json.loads(run("claude", "agents", "--json") or "[]")
     except ValueError:
-        pass
+        sessions = []
+    for s in sessions:
+        if s.get("kind") == "interactive" and s.get("pid") in pids:
+            return s
+    # 交互会话被挂到后台 (parked) 之后, claude agents 只列那个后台 job, 不再列这个 pid; 进程自己的登记文件里记着 job id,
+    # 而 pane 里显示 / 往后写 transcript 的是那个 job (实测它的 jsonl 在更新, 原会话的不动了)
+    for pid in pids:
+        reg = jload(os.path.join(HOME, ".claude/sessions", f"{pid}.json"))
+        if reg.get("sessionId"):
+            return next((s for s in sessions if reg.get("parkedJobId") and s.get("id") == reg["parkedJobId"]), reg)
     return None
 
 
