@@ -198,13 +198,16 @@ def transcript_stats(sid, cwd):
 
 def fetch(cwd, herdr_bin="herdr", workspace=None):
     """面板所在 herdr workspace 里的 agent + 不在 herdr pane 里的会话 (后台 / 别的终端里开的), 后者只要它的 worktree 是这个
-    workspace 里某个 agent 的 worktree (或面板自己的) 就算这个 workspace 的 (后台会话本身不属于任何 workspace)。
+    workspace 里某个 agent 的 worktree (或面板自己的), 或嵌在这些 worktree 目录里, 就算这个 workspace 的 (后台会话本身不属于任何 workspace)。
     前台在前、后台在后, 各自置顶的在最前。前台的带 herdr pane id (点了跳过去); 后台的带 attach 用的短 id。
     不传 workspace (面板拿不到) 就只按 worktree 算"""
     trees = {tree_key(cwd)}
 
     def mine(a, c):  # 在 herdr pane 里: 按 workspace; 不在: 按 worktree
-        return a.get("workspace_id") == workspace if a and workspace else tree_key(c or "") in trees
+        if a and workspace:
+            return a.get("workspace_id") == workspace
+        t = tree_key(c or "")  # 也算嵌在里面的 worktree: claude --worktree / 派出去的后台 agent 落在 <repo>/.claude/worktrees/<名字>
+        return t in trees or any(t.startswith(x.rstrip("/") + "/") for x in trees)
     panes, herd = {}, []
     try:
         herd = json.loads(run(herdr_bin, "agent", "list") or "{}")["result"].get("agents", [])
