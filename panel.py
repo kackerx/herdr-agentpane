@@ -709,6 +709,39 @@ def main(scr):
     # 终端只开了 1000 模式 (按键事件, 不报移动), 所以这个位只会是滚轮下
     curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
     WHEEL_DOWN = getattr(curses, "BUTTON5_PRESSED", 0) or curses.REPORT_MOUSE_POSITION
+    # 再要 SGR 编码 (1006), 自己解析: 老的 X10 编码里触控板的左右滑 (按钮 66/67) 在 ncurses 里和右键按下/松开是同一个位,
+    # 双指上下滑带一点横向就弹右键菜单。SGR 里它们是不同的编号, 按下 / 松开也分得开。终端不认 1006 就还是走 ncurses 的老路
+    sys.stdout.write("\x1b[?1006h")
+    sys.stdout.flush()
+
+    def read_sgr():
+        """ESC 后面紧跟的 SGR 鼠标序列 ([<b;x;yM 按下 / m 松开) -> (列, 行, ncurses 的 bstate), 不用管的事件 -> "skip";
+        不是鼠标序列 -> None, 读到的字符原样退回去"""
+        got = []
+        scr.nodelay(True)
+        try:
+            while len(got) < 24:
+                c = scr.getch()
+                if c == -1:
+                    break
+                got.append(c)
+                if c in (77, 109):
+                    break
+        finally:
+            scr.nodelay(False)
+            scr.timeout(250)
+        mm = re.fullmatch(r"\[<(\d+);(\d+);(\d+)([Mm])", "".join(chr(c) for c in got if c < 256))
+        if not mm:
+            for c in reversed(got):
+                curses.ungetch(c)
+            return None
+        code, x, y, press = int(mm[1]) & ~28, int(mm[2]) - 1, int(mm[3]) - 1, mm[4] == "M"  # & ~28: 去掉 shift/alt/ctrl 位
+        if code == 64:
+            return x, y, curses.BUTTON4_PRESSED
+        if code == 65:
+            return x, y, WHEEL_DOWN
+        btn = {0: curses.BUTTON1_PRESSED, 1: curses.BUTTON2_PRESSED, 2: curses.BUTTON3_PRESSED}.get(code)
+        return (x, y, btn) if btn and press else "skip"  # 左右滑 (66/67)、拖动 / 移动 (+32)、松开: 都不用
     curses.mouseinterval(0)
     scr.keypad(True)
     scr.timeout(250)
@@ -1165,6 +1198,11 @@ def main(scr):
         k = scr.getch()
         if k == -1:
             continue
+        ev = read_sgr() if k == 27 else None
+        if ev == "skip":
+            continue
+        if ev:
+            k = curses.KEY_MOUSE
         if pending and k != curses.KEY_MOUSE:
             if k == ord("y"):
                 pending[1]()
@@ -1202,7 +1240,7 @@ def main(scr):
         if k == curses.KEY_MOUSE:
             pending = None
             try:
-                _, mx, my, _, b = curses.getmouse()
+                mx, my, b = ev or (lambda g: (g[1], g[2], g[4]))(curses.getmouse())
             except curses.error:
                 continue
             if b & (curses.BUTTON4_PRESSED | WHEEL_DOWN):  # 滚轮 = 像网页一样滚内容, 选中跟着留在可见范围里
