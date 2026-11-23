@@ -32,9 +32,16 @@ def frame(path, set_id):
     src = Image.open(path).convert("RGBA")
     # 不裁成 8:9 (横图会只剩一张大脸): 整张放进 8:9 画布的底部, 上面补背景色; 透明像素也填背景色, cutout 才看得到干净的边
     w, h = src.size
-    H = max(h, w * 9 // 8)
-    im = Image.new("RGB", (w, H), src.getpixel((0, 0))[:3])
-    im.paste(src, (0, H - h), src)
+    bgc = src.getpixel((0, 0))[:3]
+    if w > h * 1.2:  # 3:2 的半身像 (眼睛在 0.335 高处): 上面补一点让眼睛落到 0.42, 再从中间裁成 8:9; 只补不裁会把脸挤到框底、下巴被框切掉
+        top = round(h * 0.147)
+        H, cw = h + top, (h + top) * 8 // 9
+        im = Image.new("RGB", (cw, H), bgc)
+        im.paste(src, ((cw - w) // 2, top), src)
+    else:
+        H = max(h, w * 9 // 8)
+        im = Image.new("RGB", (w, H), bgc)
+        im.paste(src, (0, H - h), src)
     small = im.height < 128  # pixel art: keep the pixels sharp
     work = im.resize((OUT_W * 4, OUT_H * 4), Image.Resampling.NEAREST if small else Image.Resampling.LANCZOS)
     mask = cutout(work)

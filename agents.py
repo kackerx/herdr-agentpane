@@ -234,7 +234,7 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         a = None if bg else panes.get((name, s["cwd"])) or panes.get((name, repo_key(s["cwd"])))
         if not mine(a, s["cwd"]):
             continue
-        r = dict(id=s.get("id") or s.get("sessionId"), sid=s.get("sessionId"), name=name, cwd=s["cwd"], bg=bg,
+        r = dict(id=s.get("id") or s.get("sessionId"), sid=s.get("sessionId"), name=name, cwd=s["cwd"], bg=bg, kind="claude",
                  status=STATUS.get(s.get("status"), s.get("status") or ""), model="", ctx=-1, role="", pane=None, tab=None)
         if a:
             used.add(a["pane_id"])
@@ -242,7 +242,7 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         rows.append((r, a))
     for a in herd:  # herdr 里有、claude 列表里没有的 (别的 agent, 比如 pi)
         if "_name" in a and a["pane_id"] not in used and a["_name"] not in {r["name"] for r, _ in rows} and mine(a, a.get("cwd")):
-            rows.append((dict(id=a["pane_id"], sid=None, name=a["_name"], cwd=a.get("cwd"), bg=False, status=a.get("agent_status") or "",
+            rows.append((dict(id=a["pane_id"], sid=None, name=a["_name"], cwd=a.get("cwd"), bg=False, kind=a.get("agent") or "?", status=a.get("agent_status") or "",
                               model="", ctx=-1, role="", pane=a["pane_id"], tab=a.get("tab_id")), a))
     pins, avail = jload(PINS_JSON), sets()
     out = []

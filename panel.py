@@ -961,10 +961,12 @@ def main(scr):
             face(2, y + 1, r.get("avatar"), r["status"])  # 头像离边框 1 格, 离文字 1 格
             x0 = 2 + AG.SLOT + 1
             room = wid - 2 - x0
-            tag = "bg" if r["bg"] else ""
-            put(y + 1, x0, (("▲ " if r["pinned"] else "") + r["name"])[:max(1, room - 3)], curses.A_BOLD | (ORANGE if on else 0))
-            if tag:
-                put(y + 1, wid - 2 - len(tag), tag, curses.A_BOLD | ORANGE)
+            kind_, bg_ = r.get("kind") or "claude", " bg" if r["bg"] else ""  # 右上角: agent 类型 (claude / codex / pi…), 后台的再加 bg
+            tag = kind_ + bg_
+            put(y + 1, x0, (("▲ " if r["pinned"] else "") + r["name"])[:max(1, room - len(tag) - 1)], curses.A_BOLD | (ORANGE if on else 0))
+            put(y + 1, wid - 2 - len(tag), kind_, CYAN if kind_ != "claude" else curses.A_DIM)
+            if bg_:
+                put(y + 1, wid - 2 - len(bg_), bg_, curses.A_BOLD | ORANGE)
             br_ = ("\ue0a0 " + r["branch"]) if r.get("branch") else ""
             put(y + 2, x0, br_, RED)
             if r["role"]:
