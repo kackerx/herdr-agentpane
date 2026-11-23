@@ -30,8 +30,8 @@ try:
     _cols = int(json.load(open(os.path.join(CONF_DIR, "config.json"))).get("avatar_cols", 6))
 except (OSError, ValueError, TypeError, AttributeError):
     _cols = 6
-# 头像槽 avatar_cols 列 × 3 行 (卡片 3 行内容; 试过 4 行, 卡片太高)。kitty 把图拉伸到正好铺满这些格子, 槽的像素宽高比就是
-# 显示出来的比例: 常见等宽字体格子约 1:2.4, 6×3 ≈ 0.83, 比带框头像的 8:9 稍窄 (修长; 补成正方形的 7×3 显得矮胖)。看着胖调小, 瘦调大
+# 头像槽 avatar_cols 列 × 3 行 (卡片 3 行内容; 试过 4 行, 卡片太高)。图补成正方形后被 kitty 拉伸铺满这些格子, 槽的像素宽高比
+# 就是显示出来的比例: 6×3 的修长最自然 (试过 7×3 和不补边, 都显得矮胖)。看着胖调小, 瘦调大
 SLOT, ROWS = max(4, min(_cols, 12)), 3
 DIAC = (0x0305, 0x030D, 0x030E, 0x0310, 0x0312, 0x033D, 0x033E, 0x033F, 0x0346, 0x034A, 0x034B, 0x034C)  # kitty 的行/列号 0..11 (官方 rowcolumn-diacritics 的前 12 个; 槽最宽 9 列)
 STATE_DIRS = {"idle": ("idle",), "think": ("think", "working"), "hi": ("hi", "attention"), "success": ("success", "done")}
@@ -320,8 +320,12 @@ def crop_square(raw):
                 line[i] = (line[i] + (a if pa <= pb and pa <= pc else b_ if pb <= pc else c)) & 255
         rows.append(line)
         prev = line
-    if bpp == 4 and rows[0][3] == 0:  # 带框的头像 (四角透明, 8:9): 原样用, 一套里各帧同尺寸, 裁了框会被切掉
-        return raw
+    if bpp == 4 and rows[0][3] == 0:  # 带框的头像 (四角透明, 8:9): 补透明边成正方形 (裁的话框会被切掉), 放进 6×3 显得修长
+        side = max(w, h)
+        px, py = (side - w) // 2, (side - h) // 2
+        blank = bytes(side * 4)
+        pad = [blank] * py + [bytes(px * 4) + bytes(r) + bytes((side - w - px) * 4) for r in rows] + [blank] * (side - h - py)
+        body = b"".join(b"\x00" + r for r in pad)
     else:
         side = min(w, h)
         x0, y0 = (w - side) // 2, (h - side) // 2
@@ -335,7 +339,7 @@ def crop_square(raw):
 def squared(path):
     """裁好的正方形 PNG 字节; 磁盘缓存 (按路径 + 修改时间), 解码不快, 每张只做一次"""
     cache = os.path.join(os.environ.get("HERDR_PLUGIN_STATE_DIR") or "/tmp", "avatar-square")
-    key = hashlib.sha1(f"{path}|{os.path.getmtime(path)}|v3".encode()).hexdigest()[:16] + ".png"
+    key = hashlib.sha1(f"{path}|{os.path.getmtime(path)}|v4".encode()).hexdigest()[:16] + ".png"
     p = os.path.join(cache, key)
     try:
         return open(p, "rb").read()
