@@ -256,8 +256,8 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
     except ValueError:
         sessions = []
     for s in sessions:
-        if not s.get("cwd"):
-            continue
+        if not s.get("cwd") or (s.get("pid") and jload(os.path.join(HOME, ".claude/sessions", f"{s['pid']}.json")).get("entrypoint") == "sdk-cli"):
+            continue  # sdk-cli = 别的程序用 claude -p 驱动的无头进程 (如 magpie 网关拿它当订阅通道, 回放调用方的对话), 不是 agent, 也没有终端可 attach
         bg = s.get("kind") == "background"
         name = s.get("name") or (s.get("sessionId") or "")[:8]
         a = None if bg else panes.get((name, s["cwd"])) or panes.get((name, repo_key(s["cwd"])))
