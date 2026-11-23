@@ -27,12 +27,12 @@ for _f in (AVATARS_JSON, PINS_JSON):  # 一次性: 装过 agmux 就沿用它的�
         except OSError:
             pass
 try:
-    _cols = int(json.load(open(os.path.join(CONF_DIR, "config.json"))).get("avatar_cols", 8))
+    _cols = int(json.load(open(os.path.join(CONF_DIR, "config.json"))).get("avatar_cols", 6))
 except (OSError, ValueError, TypeError, AttributeError):
-    _cols = 8
-# 头像槽 avatar_cols 列 × 4 行 (卡片因此 4 行内容)。kitty 把图拉伸到正好铺满这些格子, 槽的像素宽高比就是显示出来的比例:
-# 常见等宽字体格子约 1:2.4, 8×4 ≈ 0.83, 比带框头像的 8:9 稍窄一点 (显得修长)。看着胖就调小, 瘦就调大
-SLOT, ROWS = max(4, min(_cols, 12)), 4
+    _cols = 6
+# 头像槽 avatar_cols 列 × 3 行 (卡片 3 行内容; 试过 4 行, 卡片太高)。kitty 把图拉伸到正好铺满这些格子, 槽的像素宽高比就是
+# 显示出来的比例: 常见等宽字体格子约 1:2.4, 6×3 ≈ 0.83, 比带框头像的 8:9 稍窄 (修长; 补成正方形的 7×3 显得矮胖)。看着胖调小, 瘦调大
+SLOT, ROWS = max(4, min(_cols, 12)), 3
 DIAC = (0x0305, 0x030D, 0x030E, 0x0310, 0x0312, 0x033D, 0x033E, 0x033F, 0x0346, 0x034A, 0x034B, 0x034C)  # kitty 的行/列号 0..11 (官方 rowcolumn-diacritics 的前 12 个; 槽最宽 9 列)
 STATE_DIRS = {"idle": ("idle",), "think": ("think", "working"), "hi": ("hi", "attention"), "success": ("success", "done")}
 
