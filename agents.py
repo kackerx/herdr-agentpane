@@ -26,7 +26,13 @@ for _f in (AVATARS_JSON, PINS_JSON):  # 一次性: 装过 agmux 就沿用它的�
             shutil.copyfile(os.path.join(AGMUX_STATE, os.path.basename(_f)), _f)
         except OSError:
             pass
-SLOT, ROWS = 6, 3  # 头像: 6 列 × 3 行 (终端格子约 1:2, 所以是正方形); 所有图统一裁成正方形再放, 大小一致、不变形
+try:
+    _cols = int(json.load(open(os.path.join(CONF_DIR, "config.json"))).get("avatar_cols", 7))
+except (OSError, ValueError, TypeError, AttributeError):
+    _cols = 7
+# 头像槽 avatar_cols 列 × 3 行, 图统一补成正方形再放 (kitty 按格子拉伸, 槽的像素宽高比就是显示出来的比例)。
+# 常见等宽字体格子约 1:2.3~2.4, 7 列 × 3 行最接近正方形; 1:2 的字体用 6。字形更窄更高的头像看着瘦就调大
+SLOT, ROWS = max(4, min(_cols, 12)), 3
 DIAC = (0x0305, 0x030D, 0x030E, 0x0310, 0x0312, 0x033D, 0x033E, 0x033F, 0x0346, 0x034A, 0x034B, 0x034C)  # kitty 的行/列号 0..11 (官方 rowcolumn-diacritics 的前 12 个; 槽最宽 9 列)
 STATE_DIRS = {"idle": ("idle",), "think": ("think", "working"), "hi": ("hi", "attention"), "success": ("success", "done")}
 
