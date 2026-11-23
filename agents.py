@@ -314,9 +314,16 @@ def crop_square(raw):
                 line[i] = (line[i] + (a if pa <= pb and pa <= pc else b_ if pb <= pc else c)) & 255
         rows.append(line)
         prev = line
-    side = min(w, h)
-    x0, y0 = (w - side) // 2, (h - side) // 2
-    body = b"".join(b"\x00" + bytes(r[x0 * bpp:(x0 + side) * bpp]) for r in rows[y0:y0 + side])
+    if bpp == 4 and rows[0][3] == 0:  # 带框的头像 (四角透明, 如 party-hud 的 192x216): 补透明边成正方形, 裁的话框会被切掉
+        side = max(w, h)
+        px, py = (side - w) // 2, (side - h) // 2
+        blank = bytes(side * 4)
+        pad = [blank] * py + [bytes(px * 4) + bytes(r) + bytes((side - w - px) * 4) for r in rows] + [blank] * (side - h - py)
+        body = b"".join(b"\x00" + r for r in pad)
+    else:
+        side = min(w, h)
+        x0, y0 = (w - side) // 2, (h - side) // 2
+        body = b"".join(b"\x00" + bytes(r[x0 * bpp:(x0 + side) * bpp]) for r in rows[y0:y0 + side])
 
     def chunk(t, d):
         return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
@@ -326,7 +333,7 @@ def crop_square(raw):
 def squared(path):
     """裁好的正方形 PNG 字节; 磁盘缓存 (按路径 + 修改时间), 解码不快, 每张只做一次"""
     cache = os.path.join(os.environ.get("HERDR_PLUGIN_STATE_DIR") or "/tmp", "avatar-square")
-    key = hashlib.sha1(f"{path}|{os.path.getmtime(path)}|v1".encode()).hexdigest()[:16] + ".png"
+    key = hashlib.sha1(f"{path}|{os.path.getmtime(path)}|v2".encode()).hexdigest()[:16] + ".png"
     p = os.path.join(cache, key)
     try:
         return open(p, "rb").read()

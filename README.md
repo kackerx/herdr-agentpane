@@ -74,3 +74,5 @@ State (remembered width, page, pins, avatar choices, caches, `panel.log`) lives 
 ## License
 
 MIT. Bundled avatars: see [avatars/CREDITS.md](avatars/CREDITS.md).
+Avatar frames and glow follow [party-hud](https://github.com/mangow314/party-hud) (its portraits are CC0; `tools/decor.py`
+is vendored from it under MIT). Restyle a set you add with `uv run --with pillow --with numpy tools/frame_sets.py <set>`.
