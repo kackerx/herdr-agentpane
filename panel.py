@@ -857,7 +857,7 @@ def main(scr):
         tpos = [(2 + 2 * (k // tcols), cx[k % tcols], cw[k % tcols]) for k in range(len(TABS))]  # 行与行之间空一行 (贴着看不出是两个)
         body0 = tpos[-1][0] + 2  # 头 + 分割线 + 页签行 + 分割线
         body_h = max(1, h - body0 - 4 - box_h)  # 底下: tips 框 + 分割线 + 按钮 + 说明 2 行
-        rowh = 5 if T == "Agents" else 1  # Agents 页一张卡: 上边框 + 3 行内容 + 下边框
+        rowh = AG.ROWS + 2 if T == "Agents" else 1  # Agents 页一张卡: 上边框 + 头像那么高的内容 + 下边框
         vis = max(1, body_h // rowh)  # 一屏能放几项
         av_cells.clear()
         if time.time() - avail_at > 8:
@@ -952,10 +952,10 @@ def main(scr):
             wid = w - 1  # 框占 0..w-2
             title = f" {r['status'] or '?'} "
             put(y, 0, tl + hz + title + hz * max(0, wid - 3 - len(title)) + tr, bc)
-            for k_ in range(1, 4):
+            for k_ in range(1, AG.ROWS + 1):
                 put(y + k_, 0, vt, bc)
                 put(y + k_, wid - 1, vt, bc)
-            put(y + 4, 0, bl + hz * (wid - 2) + br, bc)
+            put(y + AG.ROWS + 1, 0, bl + hz * (wid - 2) + br, bc)
             if on:
                 put(y + 2, 0, "❯", ORANGE | curses.A_BOLD)  # 选中的箭头, 压在左框上
             face(2, y + 1, r.get("avatar"), r["status"])  # 头像离边框 1 格, 离文字 1 格
@@ -973,9 +973,10 @@ def main(scr):
                 put(y + 2, x0 + len(br_) + 2, r["role"], curses.A_DIM)
             if r["model"]:
                 put(y + 3, x0, r["model"], curses.A_DIM)
-            if r["ctx"] >= 0:
+            if r["ctx"] >= 0:  # 头像有 4 行高时上下文条单独一行, 否则和模型同一行靠右
                 cb = f"{'▰' * round(r['ctx'] / 10):▱<10} {r['ctx']}%"
-                put(y + 3, wid - 2 - len(cb), cb, GREEN if r["ctx"] < 60 else ORANGE if r["ctx"] < 80 else RED)
+                cy_ = y + AG.ROWS if AG.ROWS >= 4 else y + 3
+                put(cy_, x0 if AG.ROWS >= 4 else wid - 2 - len(cb), cb, GREEN if r["ctx"] < 60 else ORANGE if r["ctx"] < 80 else RED)
 
         def overlay_box(x, y, bw, bh, title="", color=ORANGE):
             """在 (x,y) 起画一个 bw×bh 的圆角框并清空里面 (压在卡片上); 被盖住的头像图片从 av_cells 里去掉"""
@@ -1051,7 +1052,7 @@ def main(scr):
             ci = picker["card"] if picker else menu["card"]
             cy = body0 + (ci - top[T]) * rowh
             if picker:  # 头像选择框: 在这张卡正下方 (放不下就在上方), 5 列格子, 当前的先选着
-                cw_, ch_ = 9, AG.ROWS + 1  # 一格 9 列: 头像 6 列居中, 标签 8 列
+                cw_, ch_ = AG.SLOT + 2, AG.ROWS + 1  # 一格: 头像居中, 两边各空 1 列, 下面一行标签
                 ncol = max(1, min(5, (w - 4) // cw_))
                 picker["ncol"] = ncol
                 need = (len(picker["ids"]) + ncol - 1) // ncol
@@ -1258,7 +1259,7 @@ def main(scr):
                 if picker:  # 头像框: 点格子 = 选中, 再点同一个 = 绑定; 点框外 = 关
                     bx, by, bw_, bh_ = picker.get("rect", (0, 0, 0, 0))
                     if bx <= mx < bx + bw_ and by <= my < by + bh_:
-                        cw_, ch_ = 9, AG.ROWS + 1
+                        cw_, ch_ = AG.SLOT + 2, AG.ROWS + 1
                         k2 = ((my - by - 1) // ch_ + picker["top"]) * picker["ncol"] + (mx - 2) // cw_
                         if 0 <= k2 < len(picker["ids"]) and (mx - 2) // cw_ < picker["ncol"]:
                             if k2 == picker["i"]:

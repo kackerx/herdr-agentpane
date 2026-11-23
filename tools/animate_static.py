@@ -1,8 +1,8 @@
 """Give a single-image avatar set (party-*) the state frames the panel animates, without redrawing the character:
   think/ (working): the picture plus twinkling four-point stars and a slight brightening, 2 frames
   hi/ (needs you):  a glow around the frame in the set's class colour, strong / weak, 2 frames
-Output frames are 216x216 RGBA, the picture centred: the panel pads the 192x216 idle frame to that square too,
-so every frame lines up.
+All frames of the set, idle included, are 216x243 RGBA (the 192x216 picture centred, still 8:9) so the glow has room
+and every frame lines up; running it again on an already padded set does not pad it twice.
 
     uv run --with pillow --with numpy tools/animate_static.py party-cleric [...]
 """
@@ -27,8 +27,9 @@ def load(set_id):
     return Image.open(os.path.join(AVATARS, set_id, "idle", "portrait.png")).convert("RGBA")
 
 
-def square(im, size=216):
-    out = Image.new("RGBA", (size * K, size * K), (0, 0, 0, 0))
+def square(im):
+    w, h = (216, 243) if im.size == (192, 216) else im.size
+    out = Image.new("RGBA", (w * K, h * K), (0, 0, 0, 0))
     big = im.resize((im.width * K, im.height * K), Image.Resampling.LANCZOS)
     out.alpha_composite(big, ((out.width - big.width) // 2, (out.height - big.height) // 2))
     return out
@@ -68,6 +69,8 @@ def save(img, set_id, state, n):
 def main(sets):
     for s in sets:
         im, glow = load(s), COLORS[s.removeprefix("party-")][1]
+        if im.size == (192, 216):  # idle 也补成同样大小, 不然状态一变头像就缩放一下
+            shrink(square(im)).save(os.path.join(AVATARS, s, "idle", "portrait.png"), optimize=True)
         for k in (0, 1):
             save(think(im, k), s, "think", k + 1)
             save(hi(im, glow, k), s, "hi", k + 1)

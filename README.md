@@ -60,8 +60,8 @@ Press it again (or `q` in the panel) to close.
 
 - `width`: inner width in columns, or a share of the tab such as `"30%"`
 - `remember`: after you drag the panel wider or narrower it reopens at that width; `false` always uses `width`
-- `avatar_cols` (default 7): avatar width in columns (3 rows tall). Pictures are shown square; if they look thin or
-  squashed in your font, raise or lower it (6 suits fonts whose cells are about 1:2)
+- `avatar_cols` (default 8): avatar width in columns (4 rows tall, so cards have 4 lines). If avatars look thin or
+  squat in your font, raise or lower it
 
 MCP servers you want only in some projects go in `mcp.json` in the same directory (same shape as `.mcp.json`;
 `~` and `$HOME` in strings are expanded). They are not loaded anywhere by default; the MCP page lists them as
