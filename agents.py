@@ -202,10 +202,32 @@ def transcript_stats(sid, cwd):
     return out
 
 
+_peers = {}
+
+
+def peers_of(sid, cwd):
+    """-> 给这个会话发过跨会话消息的会话名 (transcript 里 origin.kind=peer 的 name)。按文件偏移增量读"""
+    p = os.path.join(HOME, ".claude/projects", re.sub(r"[/.]", "-", cwd or ""), (sid or "") + ".jsonl")
+    if not os.path.isfile(p):
+        p = next(iter(glob.glob(os.path.join(HOME, ".claude/projects/*", (sid or "") + ".jsonl"))), "")
+    off, names = _peers.get(p, (0, set()))
+    try:
+        with open(p, "rb") as f:
+            f.seek(off)
+            data = f.read()
+    except OSError:
+        return names
+    end = data.rfind(b"\n") + 1  # 只吃完整的行, 半行留到下次
+    names |= {m.decode() for m in re.findall(rb'"origin":\{"kind":"peer"[^}]*?"name":"([^"]+)"', data[:end])}
+    _peers[p] = (off + end, names)
+    return names
+
+
 def fetch(cwd, herdr_bin="herdr", workspace=None):
     """面板所在 herdr workspace 里的 agent + 不在 herdr pane 里的会话 (后台 / 别的终端里开的), 后者只要它的 worktree 是这个
     workspace 里某个 agent 的 worktree (或面板自己的), 或嵌在这些 worktree 目录里, 就算这个 workspace 的 (后台会话本身不属于任何 workspace)。
     前台在前、后台在后, 各自置顶的在最前。前台的带 herdr pane id (点了跳过去); 后台的带 attach 用的短 id。
+    后台会话还有一条: 本 workspace 的 agent 给它发过消息 (编排者派到别的仓库的 worker)。
     不传 workspace (面板拿不到) 就只按 worktree 算"""
     trees = {tree_key(cwd)}
 
@@ -227,6 +249,7 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         panes[(a["_name"], a.get("cwd"))] = a
         panes.setdefault((a["_name"], repo_key(a.get("cwd") or "")), a)  # herdr 报进程当前 cwd (会话里 cd 过就变), claude 报启动目录: 退到同仓库同名
     trees |= {tree_key(a.get("cwd") or "") for a in herd if workspace and a.get("workspace_id") == workspace and a.get("cwd")}
+    ours = {a["_name"] for a in herd if "_name" in a and workspace and a.get("workspace_id") == workspace}
     rows, used = [], set()
     try:
         sessions = json.loads(run("claude", "agents", "--json", t=20) or "[]")
@@ -238,7 +261,7 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         bg = s.get("kind") == "background"
         name = s.get("name") or (s.get("sessionId") or "")[:8]
         a = None if bg else panes.get((name, s["cwd"])) or panes.get((name, repo_key(s["cwd"])))
-        if not mine(a, s["cwd"]):
+        if not mine(a, s["cwd"]) and not (bg and ours & peers_of(s.get("sessionId"), s["cwd"])):
             continue
         r = dict(id=s.get("id") or s.get("sessionId"), sid=s.get("sessionId"), name=name, cwd=s["cwd"], bg=bg, kind="claude",
                  status=STATUS.get(s.get("status"), s.get("status") or ""), model="", ctx=-1, role="", pane=None, tab=None)
