@@ -267,11 +267,21 @@ def job_log(r):
     return max(jobs)[2] if jobs else ""
 
 
+def env_of(pid, key):
+    """另一个进程启动时的环境变量: Linux 读 /proc/<pid>/environ, macOS 用 ps -E (同用户的进程才读得到)"""
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            env = f.read().decode(errors="replace").split("\0")
+    except OSError:
+        env = run("ps", "-Eww", "-o", "command=", "-p", str(pid)).split()
+    return next((e.split("=", 1)[1] for e in env if e.startswith(key + "=")), "")
+
+
 def fetch(cwd, herdr_bin="herdr", workspace=None):
     """面板所在 herdr workspace 里的 agent + 不在 herdr pane 里的会话 (后台 / 别的终端里开的), 后者只要它的 worktree 是这个
     workspace 里某个 agent 的 worktree (或面板自己的), 或嵌在这些 worktree 目录里, 就算这个 workspace 的 (后台会话本身不属于任何 workspace)。
     前台在前、后台在后, 各自置顶的在最前。前台的带 herdr pane id (点了跳过去); 后台的带 attach 用的短 id。
-    后台会话还有一条: 本 workspace 的 agent 给它发过消息 (编排者派到别的仓库的 worker)。
+    后台会话还有两条: 从本 workspace 的 pane 里起的 (进程环境里的 HERDR_WORKSPACE_ID), 或本 workspace 的 agent 给它发过消息 (编排者派到别的仓库的 worker)。
     不传 workspace (面板拿不到) 就只按 worktree 算"""
     trees = {tree_key(cwd)}
 
@@ -307,7 +317,9 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         bg = s.get("kind") == "background"
         name = s.get("name") or (s.get("sessionId") or "")[:8]
         a = None if bg else panes.get((name, s["cwd"])) or panes.get((name, repo_key(s["cwd"])))
-        if not mine(a, s["cwd"]) and not (bg and ours & peers_of(s.get("sessionId"), s["cwd"])):
+        # 后台会话归本 workspace 的另两条: 从本 workspace 的 pane 里起的 (继承了 HERDR_WORKSPACE_ID), 或本 workspace 的 agent 给它发过消息
+        if not mine(a, s["cwd"]) and not (bg and ((workspace and s.get("pid") and env_of(s["pid"], "HERDR_WORKSPACE_ID") == workspace)
+                                                  or ours & peers_of(s.get("sessionId"), s["cwd"]))):
             continue
         r = dict(id=s.get("id") or s.get("sessionId"), sid=s.get("sessionId"), pid=s.get("pid"), name=name, cwd=s["cwd"], bg=bg, kind="claude",
                  status=STATUS.get(s.get("status"), s.get("status") or ""), model="", ctx=-1, role="", pane=None, tab=None)
