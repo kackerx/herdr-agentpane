@@ -837,8 +837,9 @@ def main(scr):
         tlabels = [f"{n}{'' if cnts.get(n) is None else ' ' + str(cnts[n])}" for n in TABS]
         # 页签 = 一行高的圆头胶囊, 排成列对齐的网格, 整体和下面卡片的左右边对齐。列数: 5 / 4 / 3 里放得下的最多的 (先试带数字, 再试只有名字);
         # 每列先取本列最长的字 + 两头半圆, 剩下的宽度一格一格补给最窄的列 (尽量等宽)
-        gap, span = 1, w - 1
-        for tcols, tlabels_ in ((c, lb) for c in (5, 4, 3) for lb in (tlabels, list(TABS))):
+        span = w - 1
+        # 5 个一行放不下时先去掉胶囊间的空格再试 (终端里字没法变小, 只能省格子), 还不够才折成 4 / 3 列
+        for tcols, tlabels_, gap in ((c, lb, g) for c in (5, 4, 3) for lb, g in ((tlabels, 1), (list(TABS), 1)) + (((list(TABS), 0),) if c == 5 else ())):
             nat = [max(len(tlabels_[k]) + 2 for k in range(j_, len(TABS), tcols)) for j_ in range(tcols)]
             if sum(nat) + (tcols - 1) * gap <= span:
                 break
@@ -848,7 +849,7 @@ def main(scr):
         for _ in range(extra // 2):  # 两格两格地补: 字两边的空格保持一样宽 (补 1 格会让字偏半格)
             cw[cw.index(min(cw))] += 2
         gaps = [gap] * (tcols - 1)
-        if extra % 2 and gaps:  # 剩的 1 格放进最后一个间隙, 右边照样和卡片对齐
+        if extra % 2 and gaps and gap:  # 剩的 1 格放进最后一个间隙, 右边照样和卡片对齐 (胶囊贴着排时不放, 不然只有那一处有缝)
             gaps[-1] += 1
         if sum(cw) + (tcols - 1) * gap > span:  # 3 列只放名字都不够 (极窄): 均分后截断
             cw = [(span - (tcols - 1) * gap) // tcols] * tcols
