@@ -246,8 +246,25 @@ def codex_jobs(owners):
         cwd = os.path.realpath(f"/proc/{pid}/cwd") if os.path.isdir(f"/proc/{pid}") else own["cwd"]  # macOS 没有 /proc, 退到派它的会话的目录
         mm = re.search(r"\s(?:-m|--model)[ =](\S+)", args)
         out.append(dict(id=pid, sid=None, name=f"codex {m.group(1) or m.group(2)} {pid}", cwd=cwd, bg=False, kind="codex", status="working",
-                        model=mm.group(1) if mm else "", ctx=-1, role="", pane=None, tab=None, via=own["name"]))
+                        model=mm.group(1) if mm else "", ctx=-1, role="", pane=None, tab=None, via=own["name"], owner_sid=own["sid"]))
     return out
+
+
+def job_log(r):
+    """无头 codex 的输出文件: codex exec 的 stdout 重定向到的文件; Codex 插件的任务 stdout 是管道, 退到插件给这个会话记的、还在跑的任务日志"""
+    pid = r["id"]
+    if os.path.isdir(f"/proc/{pid}"):
+        out = os.path.realpath(f"/proc/{pid}/fd/1")
+    else:  # macOS 没有 /proc
+        out = next((ln[1:] for ln in run("lsof", "-a", "-p", pid, "-d", "1", "-Fn").splitlines() if ln.startswith("n")), "")
+    if os.path.isfile(out):
+        return out
+    jobs = []
+    for f in glob.glob(os.path.join(HOME, ".claude/plugins/data/codex-openai-codex/state/*/jobs/*.json")):
+        j = jload(f)
+        if j.get("sessionId") == r.get("owner_sid") and j.get("status") in ("running", "queued") and os.path.isfile(j.get("logFile") or ""):
+            jobs.append((str(j.get("pid")) == pid, j.get("startedAt") or "", j["logFile"]))
+    return max(jobs)[2] if jobs else ""
 
 
 def fetch(cwd, herdr_bin="herdr", workspace=None):

@@ -532,6 +532,8 @@ class Model:
             return
         if r["bg"]:
             cmd = "claude attach " + shlex.quote(r["id"])
+        elif r.get("via") and AG.job_log(r):  # 无头 codex: 没终端可接, 只读看它的输出 (less 跟着尾巴, ctrl+c 停下来翻, q 关)
+            cmd = "less -R +F " + shlex.quote(AG.job_log(r))
         elif r.get("pane"):
             cmd = "herdr agent attach " + shlex.quote(r["pane"])
         else:
