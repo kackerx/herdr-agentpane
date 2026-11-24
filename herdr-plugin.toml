@@ -31,7 +31,7 @@ command = ["sh", "-c", "exec ${EDITOR:-nvim} \"$EDIT_FILE\""]
 # title 是占位, panel.py 开窗前临时改成 agent 名 (herdr 浮窗标题只认清单, 开完还原)
 [[panes]]
 id = "attach"
-title = "agent  ·  ^q q close"
+title = "排查 herdr 的 prefix+o 浮窗闪退 | herdr-agentpane  ·  ^q q close"
 placement = "popup"
 width = "80%"
 height = "80%"

@@ -535,7 +535,7 @@ class Model:
         elif r.get("pane"):
             cmd = "herdr agent attach " + shlex.quote(r["pane"])
         else:
-            self.say("✗ " + r["name"] + " is not in a herdr pane (nothing to attach)")
+            self.say("✗ " + r["name"] + (f" is a headless job run by {r['via']} (nothing to attach)" if r.get("via") else " is not in a herdr pane (nothing to attach)"))
             return
         toml = os.path.join(HERE, "herdr-plugin.toml")
         src = open(toml).read()

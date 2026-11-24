@@ -223,6 +223,33 @@ def peers_of(sid, cwd):
     return names
 
 
+JOB = re.compile(r"^(?:\S*/)?(?:codex (exec)|node\S* \S*codex-companion\.mjs (\w+))\b")
+
+
+def codex_jobs(owners):
+    """Claude 会话自己跑起来的无头 codex (Bash 里的 codex exec / Codex 插件的 codex-companion review|task…): 没有终端, claude 和 herdr
+    的 agent 列表里都没有。认法: 顺着父进程往上找, 碰到 owners 里某个会话的 claude 进程就是它派的 (owners: pid → 卡片)"""
+    procs = {}
+    for ln in run("ps", "-axo", "pid=,ppid=,args=").splitlines():
+        f = ln.split(None, 2)
+        if len(f) == 3:
+            procs[f[0]] = (f[1], f[2])
+    out = []
+    for pid, (ppid, args) in procs.items():
+        m = JOB.match(args)
+        q, hops = ppid, 0
+        while m and q not in owners and q in procs and hops < 10:  # 一般 2 跳: codex ← zsh -c ← claude
+            q, hops = procs[q][0], hops + 1
+        if not m or q not in owners:
+            continue
+        own = owners[q]
+        cwd = os.path.realpath(f"/proc/{pid}/cwd") if os.path.isdir(f"/proc/{pid}") else own["cwd"]  # macOS 没有 /proc, 退到派它的会话的目录
+        mm = re.search(r"\s(?:-m|--model)[ =](\S+)", args)
+        out.append(dict(id=pid, sid=None, name=f"codex {m.group(1) or m.group(2)} {pid}", cwd=cwd, bg=False, kind="codex", status="working",
+                        model=mm.group(1) if mm else "", ctx=-1, role="", pane=None, tab=None, via=own["name"]))
+    return out
+
+
 def fetch(cwd, herdr_bin="herdr", workspace=None):
     """面板所在 herdr workspace 里的 agent + 不在 herdr pane 里的会话 (后台 / 别的终端里开的), 后者只要它的 worktree 是这个
     workspace 里某个 agent 的 worktree (或面板自己的), 或嵌在这些 worktree 目录里, 就算这个 workspace 的 (后台会话本身不属于任何 workspace)。
@@ -263,7 +290,7 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         a = None if bg else panes.get((name, s["cwd"])) or panes.get((name, repo_key(s["cwd"])))
         if not mine(a, s["cwd"]) and not (bg and ours & peers_of(s.get("sessionId"), s["cwd"])):
             continue
-        r = dict(id=s.get("id") or s.get("sessionId"), sid=s.get("sessionId"), name=name, cwd=s["cwd"], bg=bg, kind="claude",
+        r = dict(id=s.get("id") or s.get("sessionId"), sid=s.get("sessionId"), pid=s.get("pid"), name=name, cwd=s["cwd"], bg=bg, kind="claude",
                  status=STATUS.get(s.get("status"), s.get("status") or ""), model="", ctx=-1, role="", pane=None, tab=None)
         if a:
             used.add(a["pane_id"])
@@ -273,16 +300,18 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         if "_name" in a and a["pane_id"] not in used and a["_name"] not in {r["name"] for r, _ in rows} and mine(a, a.get("cwd")):
             rows.append((dict(id=a["pane_id"], sid=None, name=a["_name"], cwd=a.get("cwd"), bg=False, kind=a.get("agent") or "?", status=a.get("agent_status") or "",
                               model="", ctx=-1, role="", pane=a["pane_id"], tab=a.get("tab_id")), a))
+    rows += [(r, None) for r in codex_jobs({str(r["pid"]): r for r, _ in rows if r.get("pid")})]
     pins, avail = jload(PINS_JSON), sets()
     out = []
     for r, a in rows:
         tk = (a or {}).get("tokens") or {}
-        r["model"], r["ctx"] = tk.get("model") or "", pct(tk.get("ctx"))
+        r["model"], r["ctx"] = tk.get("model") or r["model"], pct(tk.get("ctx"))
         if not r["model"] or r["ctx"] < 0:
             m_, c_, role = transcript_stats(r["sid"], r["cwd"])
             r["model"], r["ctx"], r["role"] = r["model"] or m_, r["ctx"] if r["ctx"] >= 0 else c_, role
         else:
             r["role"] = transcript_stats(r["sid"], r["cwd"])[2]
+        r["role"] = r.get("via") and "← " + r["via"] or r["role"]
         r["branch"] = branch_of(r["cwd"])
         r["pinned"] = r["name"] in pins
         r["pin_at"] = pins.get(r["name"], "")
