@@ -973,10 +973,10 @@ def main(scr):
                 put(y + 2, x0 + len(br_) + 2, r["role"], curses.A_DIM)
             if r["model"]:
                 put(y + 3, x0, r["model"], curses.A_DIM)
-            if r["ctx"] >= 0:  # 头像有 4 行高时上下文条单独一行, 否则和模型同一行靠右
-                cb = f"{'▰' * round(r['ctx'] / 10):▱<10} {r['ctx']}%"
-                cy_ = y + AG.ROWS if AG.ROWS >= 4 else y + 3
-                put(cy_, x0 if AG.ROWS >= 4 else wid - 2 - len(cb), cb, GREEN if r["ctx"] < 60 else ORANGE if r["ctx"] < 80 else RED)
+            if r["ctx"] >= 0:  # 上下文条压在顶边框上, 跟在状态后面 (放卡片里太占宽度, 模型名会被挤)
+                cb = f"{'▰' * round(r['ctx'] / 10):▱<10} {r['ctx']}% "
+                if 2 + len(title) + len(cb) <= wid - 2:
+                    put(y, 2 + len(title), cb, GREEN if r["ctx"] < 60 else ORANGE if r["ctx"] < 80 else RED)
 
         def overlay_box(x, y, bw, bh, title="", color=ORANGE):
             """在 (x,y) 起画一个 bw×bh 的圆角框并清空里面 (压在卡片上); 被盖住的头像图片从 av_cells 里去掉"""
