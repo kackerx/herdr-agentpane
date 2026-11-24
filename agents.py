@@ -290,8 +290,10 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         if tk.get("kind") == "bg":
             continue
         a["_name"] = tk.get("name") or a.get("terminal_title_stripped") or a.get("agent") or a["pane_id"]
-        panes[(a["_name"], a.get("cwd"))] = a
-        panes.setdefault((a["_name"], repo_key(a.get("cwd") or "")), a)  # herdr 报进程当前 cwd (会话里 cd 过就变), claude 报启动目录: 退到同仓库同名
+        # 名字两处来: claude-hud 报的 token 和终端标题。token 可能被从这个 pane 起的后台会话顶掉 (它继承了 HERDR_PANE_ID), 标题不会, 两个都登记
+        for n in {a["_name"], a.get("terminal_title_stripped")} - {None, ""}:
+            panes[(n, a.get("cwd"))] = a
+            panes.setdefault((n, repo_key(a.get("cwd") or "")), a)  # herdr 报进程当前 cwd (会话里 cd 过就变), claude 报启动目录: 退到同仓库同名
     trees |= {tree_key(a.get("cwd") or "") for a in herd if workspace and a.get("workspace_id") == workspace and a.get("cwd")}
     ours = {a["_name"] for a in herd if "_name" in a and workspace and a.get("workspace_id") == workspace}
     rows, used = [], set()
@@ -322,6 +324,8 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
     out = []
     for r, a in rows:
         tk = (a or {}).get("tokens") or {}
+        if tk.get("name") and tk["name"] != r["name"]:  # token 是别的会话报的 (见上), 模型/上下文不能用
+            tk = {}
         r["model"], r["ctx"] = tk.get("model") or r["model"], pct(tk.get("ctx"))
         if not r["model"] or r["ctx"] < 0:
             m_, c_, role = transcript_stats(r["sid"], r["cwd"])
