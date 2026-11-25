@@ -250,8 +250,10 @@ def codex_jobs(owners, sids={}, workspace=None):
         q, hops = ppid, 0
         while q not in owners and q in procs and hops < 10:  # 一般 2~4 跳: codex ← zsh -c ← claude, 中间可能隔着脚本
             q, hops = procs[q][0], hops + 1
-        own = owners.get(q) or sids.get(env_of(pid, "CODEX_COMPANION_SESSION_ID") or env_of(pid, "CLAUDE_CODE_SESSION_ID"))
-        if not own and not (workspace and env_of(pid, "HERDR_WORKSPACE_ID") == workspace):
+        esid = env_of(pid, "CODEX_COMPANION_SESSION_ID") or env_of(pid, "CLAUDE_CODE_SESSION_ID")
+        own = owners.get(q) or sids.get(esid)
+        # 是别的 workspace 的会话派的就不算; 只有不是 Claude 会话起的 (自己在 pane 里敲的脚本) 才看 HERDR_WORKSPACE_ID
+        if not own and not (workspace and not esid and env_of(pid, "HERDR_WORKSPACE_ID") == workspace):
             continue
         own = own or {"name": "", "sid": None, "cwd": ""}
         cwd = os.path.realpath(f"/proc/{pid}/cwd") if os.path.isdir(f"/proc/{pid}") else own["cwd"]  # macOS 没有 /proc, 退到派它的会话的目录
@@ -283,6 +285,30 @@ def job_log(r):
         if r.get("owner_sid") and j.get("sessionId") == r["owner_sid"] and j.get("status") in ("running", "queued") and os.path.isfile(j.get("logFile") or ""):
             jobs.append((str(j.get("pid")) == pid, j.get("startedAt") or "", j["logFile"]))
     return max(jobs)[2] if jobs else ""
+
+
+def launched_by():
+    """后台会话 id → 起它的会话 id (逗号分隔): Claude Code daemon 的 roster 里每个 worker 的 dispatch.env 记着"""
+    ws = jload(os.path.join(HOME, ".claude/daemon/roster.json")).get("workers") or {}
+    return {w.get("sessionId"): (w.get("dispatch") or {}).get("env", {}).get("CLAUDE_CODE_LAUNCHED_BY_SESSION_IDS") or "" for w in ws.values()}
+
+
+_sid_names = {}
+
+
+def sid_name(sid, names):
+    """会话 id → 名字: 先查当前在跑的; /clear 过的老 id 不在了, 从它 transcript 开头的 agent-name / custom-title 取"""
+    if names.get(sid):
+        return names[sid]
+    if sid not in _sid_names:
+        p = next(iter(glob.glob(os.path.join(HOME, ".claude/projects/*", sid + ".jsonl"))), "")
+        try:
+            with open(p, "rb") as f:
+                m = re.search(rb'"(?:agentName|customTitle)":"([^"]+)"', f.read(16384))
+        except OSError:
+            m = None
+        _sid_names[sid] = m.group(1).decode() if m else ""
+    return _sid_names[sid]
 
 
 def env_of(pid, key):
@@ -333,6 +359,8 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         sessions = json.loads(run("claude", "agents", "--json", t=20) or "[]")
     except ValueError:
         sessions = []
+    names = {s.get("sessionId"): s.get("name") for s in sessions}
+    launchers = {sid: [x for x in v.split(",") if x] for sid, v in launched_by().items()}
     for s in sessions:
         if not s.get("cwd") or (s.get("pid") and jload(os.path.join(HOME, ".claude/sessions", f"{s['pid']}.json")).get("entrypoint") == "sdk-cli"):
             continue  # sdk-cli = 别的程序用 claude -p 驱动的无头进程 (如 magpie 网关拿它当订阅通道, 回放调用方的对话), 不是 agent, 也没有终端可 attach
@@ -340,9 +368,9 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         name = s.get("name") or (s.get("sessionId") or "")[:8]
         # 最准的是会话进程自己环境里的 HERDR_PANE_ID (在哪个 pane 里起的); 名字匹配兜底 (裸 claude 的名字是 derived 的, pane 上报的是 "claude")
         a = None if bg else (byid.get(env_of(s["pid"], "HERDR_PANE_ID")) if s.get("pid") else None) or panes.get((name, s["cwd"])) or panes.get((name, repo_key(s["cwd"])))
-        # 后台会话归本 workspace 的另两条: 从本 workspace 的 pane 里起的 (继承了 HERDR_WORKSPACE_ID), 或本 workspace 的 agent 给它发过消息
-        if not mine(a, s["cwd"]) and not (bg and ((workspace and s.get("pid") and env_of(s["pid"], "HERDR_WORKSPACE_ID") == workspace)
-                                                  or ours & peers_of(s.get("sessionId"), s["cwd"]))):
+        # 后台会话归本 workspace 的另两条: 是本 workspace 的 agent 起的 (daemon 登记的 CLAUDE_CODE_LAUNCHED_BY_SESSION_IDS), 或给它发过消息。
+        # 别看后台会话进程里的 HERDR_*: 它是从 daemon 预热的 bg-spare 进程领的, 环境是当初起 daemon 的那个 pane 的, 和谁派的无关
+        if not mine(a, s["cwd"]) and not (bg and ours & ({sid_name(x, names) for x in launchers.get(s.get("sessionId"), ())} | peers_of(s.get("sessionId"), s["cwd"]))):
             continue
         r = dict(id=s.get("id") or s.get("sessionId"), sid=s.get("sessionId"), pid=s.get("pid"), name=name, cwd=s["cwd"], bg=bg, kind="claude",
                  status=STATUS.get(s.get("status") or s.get("state"), s.get("status") or s.get("state") or ""), model="", ctx=-1, role="", pane=None, tab=None)

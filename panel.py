@@ -976,12 +976,12 @@ def main(scr):
             put(y + 1, wid - 2 - len(tag), kind_, CYAN if kind_ != "claude" else curses.A_DIM)
             if bg_:
                 put(y + 1, wid - 2 - len(bg_), bg_, curses.A_BOLD | ORANGE)
+            fit = lambda t, n: t if len(t) <= n else t[:max(0, n - 1)] + "…"  # 超出卡片右框的从尾巴截
             br_ = ("\ue0a0 " + r["branch"]) if r.get("branch") else ""
-            put(y + 2, x0, br_, RED)
-            if r["role"]:
-                put(y + 2, x0 + len(br_) + 2, r["role"], curses.A_DIM)
-            if r["model"]:
-                put(y + 3, x0, r["model"], curses.A_DIM)
+            put(y + 2, x0, fit(br_, room), RED)  # 分支独占一行; 角色挪到模型后面 (以前跟在分支后, 分支一长就看不到)
+            line3 = "  ".join(t for t in (r["model"], r["role"]) if t)
+            if line3:
+                put(y + 3, x0, fit(line3, room), curses.A_DIM)
             if r["ctx"] >= 0:  # 上下文条压在顶边框上, 跟在状态后面 (放卡片里太占宽度, 模型名会被挤)
                 cb = f"{'▰' * round(r['ctx'] / 10):▱<10} {r['ctx']}% "
                 if 2 + len(title) + len(cb) <= wid - 2:
