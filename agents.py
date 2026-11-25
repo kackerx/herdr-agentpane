@@ -224,11 +224,14 @@ def peers_of(sid, cwd):
 
 
 JOB = re.compile(r"^(?:\S*/)?(?:codex (exec)|node\S* \S*codex-companion\.mjs (\w+))\b")
+ACPX = re.compile(r"(?:^|[\s/])acpx(?:\.m?js)? (.*)")
 
 
-def codex_jobs(owners):
-    """Claude 会话自己跑起来的无头 codex (Bash 里的 codex exec / Codex 插件的 codex-companion review|task…): 没有终端, claude 和 herdr
-    的 agent 列表里都没有。认法: 顺着父进程往上找, 碰到 owners 里某个会话的 claude 进程就是它派的 (owners: pid → 卡片)"""
+def codex_jobs(owners, sids={}, workspace=None):
+    """Claude 会话自己跑起来的无头 agent: Bash 里的 codex exec / Codex 插件的 codex-companion review|task… / acpx 驱动的
+    任意 agent (agy-ask 就是 acpx agy -s …)。它们没有终端, claude 和 herdr 的 agent 列表里都没有。认是谁派的:
+    1) 顺着父进程往上找, 碰到 owners (pid → 卡片) 里某个会话的 claude 进程; 2) 脚本被 nohup/& 甩成孤儿时父链断了,
+    退到进程环境里继承的 CLAUDE_CODE_SESSION_ID (sids: session id → 卡片); 3) 再退到 HERDR_WORKSPACE_ID 是本 workspace"""
     procs = {}
     for ln in run("ps", "-axo", "pid=,ppid=,args=").splitlines():
         f = ln.split(None, 2)
@@ -236,17 +239,32 @@ def codex_jobs(owners):
             procs[f[0]] = (f[1], f[2])
     out = []
     for pid, (ppid, args) in procs.items():
-        m = JOB.match(args)
-        q, hops = ppid, 0
-        while m and q not in owners and q in procs and hops < 10:  # 一般 2 跳: codex ← zsh -c ← claude
-            q, hops = procs[q][0], hops + 1
-        if not m or q not in owners:
+        m, x = JOB.match(args), ACPX.search(args)
+        if x:  # acpx … <agent> -s <会话名> "<提问>" / acpx … <agent> exec "…"; 会话管理 (sessions new / set model …) 和 queue owner 不算
+            rest = x.group(1)
+            ms = re.search(r"(?:^|\s)([\w.-]+)\s+(?:-s|--session)\s+(\S+)(?!\S)(?!\s+(?:set|cancel|status)\b)", rest) or re.search(r"(?:^|\s)([\w.-]+)\s+(exec)\b", rest)
+            if not ms or "__queue-owner" in rest or re.search(r"\ssessions\s", " " + rest):
+                continue
+        elif not m:
             continue
-        own = owners[q]
+        q, hops = ppid, 0
+        while q not in owners and q in procs and hops < 10:  # 一般 2~4 跳: codex ← zsh -c ← claude, 中间可能隔着脚本
+            q, hops = procs[q][0], hops + 1
+        own = owners.get(q) or sids.get(env_of(pid, "CODEX_COMPANION_SESSION_ID") or env_of(pid, "CLAUDE_CODE_SESSION_ID"))
+        if not own and not (workspace and env_of(pid, "HERDR_WORKSPACE_ID") == workspace):
+            continue
+        own = own or {"name": "", "sid": None, "cwd": ""}
         cwd = os.path.realpath(f"/proc/{pid}/cwd") if os.path.isdir(f"/proc/{pid}") else own["cwd"]  # macOS 没有 /proc, 退到派它的会话的目录
         mm = re.search(r"\s(?:-m|--model)[ =](\S+)", args)
-        out.append(dict(id=pid, sid=None, name=f"codex {m.group(1) or m.group(2)} {pid}", cwd=cwd, bg=False, kind="codex", status="working",
-                        model=mm.group(1) if mm else "", ctx=-1, role="", pane=None, tab=None, via=own["name"], owner_sid=own["sid"]))
+        r = dict(id=pid, sid=None, cwd=cwd, bg=False, status="working", model=mm.group(1) if mm else "", ctx=-1, role="",
+                 pane=None, tab=None, via=own["name"], owner_sid=own["sid"])
+        if x:
+            mc = re.search(r"--cwd\s+(\S+)", rest)
+            r.update(kind=ms.group(1), name=ms.group(2) if ms.group(2) != "exec" else f"{ms.group(1)} exec {pid}",
+                     acpx=dict(agent=ms.group(1), session=ms.group(2), cwd=mc.group(1) if mc else cwd))
+        else:
+            r.update(kind="codex", name=f"codex {m.group(1) or m.group(2)} {pid}")
+        out.append(r)
     return out
 
 
@@ -262,7 +280,7 @@ def job_log(r):
     jobs = []
     for f in glob.glob(os.path.join(HOME, ".claude/plugins/data/codex-openai-codex/state/*/jobs/*.json")):
         j = jload(f)
-        if j.get("sessionId") == r.get("owner_sid") and j.get("status") in ("running", "queued") and os.path.isfile(j.get("logFile") or ""):
+        if r.get("owner_sid") and j.get("sessionId") == r["owner_sid"] and j.get("status") in ("running", "queued") and os.path.isfile(j.get("logFile") or ""):
             jobs.append((str(j.get("pid")) == pid, j.get("startedAt") or "", j["logFile"]))
     return max(jobs)[2] if jobs else ""
 
@@ -322,7 +340,7 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
                                                   or ours & peers_of(s.get("sessionId"), s["cwd"]))):
             continue
         r = dict(id=s.get("id") or s.get("sessionId"), sid=s.get("sessionId"), pid=s.get("pid"), name=name, cwd=s["cwd"], bg=bg, kind="claude",
-                 status=STATUS.get(s.get("status"), s.get("status") or ""), model="", ctx=-1, role="", pane=None, tab=None)
+                 status=STATUS.get(s.get("status") or s.get("state"), s.get("status") or s.get("state") or ""), model="", ctx=-1, role="", pane=None, tab=None)
         if a:
             used.add(a["pane_id"])
             r.update(pane=a["pane_id"], tab=a.get("tab_id"), status=a.get("agent_status") or r["status"])
@@ -331,7 +349,7 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         if "_name" in a and a["pane_id"] not in used and a["_name"] not in {r["name"] for r, _ in rows} and mine(a, a.get("cwd")):
             rows.append((dict(id=a["pane_id"], sid=None, name=a["_name"], cwd=a.get("cwd"), bg=False, kind=a.get("agent") or "?", status=a.get("agent_status") or "",
                               model="", ctx=-1, role="", pane=a["pane_id"], tab=a.get("tab_id")), a))
-    rows += [(r, None) for r in codex_jobs({str(r["pid"]): r for r, _ in rows if r.get("pid")})]
+    rows += [(r, None) for r in codex_jobs({str(r["pid"]): r for r, _ in rows if r.get("pid")}, {r["sid"]: r for r, _ in rows if r["sid"]}, workspace)]
     pins, avail = jload(PINS_JSON), sets()
     out = []
     for r, a in rows:

@@ -532,12 +532,18 @@ class Model:
             return
         if r["bg"]:
             cmd = "claude attach " + shlex.quote(r["id"])
-        elif r.get("via") and AG.job_log(r):  # 无头 codex: 没终端可接, 只读看它的输出 (less 跟着尾巴, ctrl+c 停下来翻, q 关)
+        elif r.get("acpx"):  # acpx 会话: 旁观它的事件流 (不影响正在跑的这一轮)
+            x = r["acpx"]
+            cmd = f"acpx --cwd {shlex.quote(x['cwd'])} {shlex.quote(x['agent'])} sessions watch -s {shlex.quote(x['session'])} 2>&1 | less -R +F" if x["session"] != "exec" else ""
+            if not cmd:
+                self.say("✗ " + r["name"] + " is a one-shot acpx exec (no session to watch)")
+                return
+        elif "owner_sid" in r and AG.job_log(r):  # 无头 codex: 没终端可接, 只读看它的输出 (less 跟着尾巴, ctrl+c 停下来翻, q 关)
             cmd = "less -R +F " + shlex.quote(AG.job_log(r))
         elif r.get("pane"):
             cmd = "herdr agent attach " + shlex.quote(r["pane"])
         else:
-            self.say("✗ " + r["name"] + (f" is a headless job run by {r['via']} (nothing to attach)" if r.get("via") else " is not in a herdr pane (nothing to attach)"))
+            self.say("✗ " + r["name"] + (f" is a headless job run by {r['via'] or 'a script'} (nothing to attach)" if "owner_sid" in r else " is not in a herdr pane (nothing to attach)"))
             return
         toml = os.path.join(HERE, "herdr-plugin.toml")
         src = open(toml).read()
