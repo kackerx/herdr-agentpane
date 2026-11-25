@@ -317,7 +317,10 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
         tk = a.get("tokens") or {}
         if tk.get("kind") == "bg":
             continue
-        a["_name"] = tk.get("name") or a.get("terminal_title_stripped") or a.get("agent") or a["pane_id"]
+        title = a.get("terminal_title_stripped") or ""
+        if re.match(r"^\S+@\S+:", title):  # 标题还是 shell 的 "user@host: ~/dir" (agy 不改标题): 不是名字, 用 "agent · pane"
+            title = f"{a.get('agent') or 'agent'} · {a['pane_id']}"
+        a["_name"] = tk.get("name") or title or a.get("agent") or a["pane_id"]
         # 名字两处来: claude-hud 报的 token 和终端标题。token 可能被从这个 pane 起的后台会话顶掉 (它继承了 HERDR_PANE_ID), 标题不会, 两个都登记
         for n in {a["_name"], a.get("terminal_title_stripped")} - {None, ""}:
             panes[(n, a.get("cwd"))] = a
@@ -325,6 +328,7 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
     trees |= {tree_key(a.get("cwd") or "") for a in herd if workspace and a.get("workspace_id") == workspace and a.get("cwd")}
     ours = {a["_name"] for a in herd if "_name" in a and workspace and a.get("workspace_id") == workspace}
     rows, used = [], set()
+    byid = {a["pane_id"]: a for a in herd if "_name" in a}
     try:
         sessions = json.loads(run("claude", "agents", "--json", t=20) or "[]")
     except ValueError:
@@ -334,7 +338,8 @@ def fetch(cwd, herdr_bin="herdr", workspace=None):
             continue  # sdk-cli = 别的程序用 claude -p 驱动的无头进程 (如 magpie 网关拿它当订阅通道, 回放调用方的对话), 不是 agent, 也没有终端可 attach
         bg = s.get("kind") == "background"
         name = s.get("name") or (s.get("sessionId") or "")[:8]
-        a = None if bg else panes.get((name, s["cwd"])) or panes.get((name, repo_key(s["cwd"])))
+        # 最准的是会话进程自己环境里的 HERDR_PANE_ID (在哪个 pane 里起的); 名字匹配兜底 (裸 claude 的名字是 derived 的, pane 上报的是 "claude")
+        a = None if bg else (byid.get(env_of(s["pid"], "HERDR_PANE_ID")) if s.get("pid") else None) or panes.get((name, s["cwd"])) or panes.get((name, repo_key(s["cwd"])))
         # 后台会话归本 workspace 的另两条: 从本 workspace 的 pane 里起的 (继承了 HERDR_WORKSPACE_ID), 或本 workspace 的 agent 给它发过消息
         if not mine(a, s["cwd"]) and not (bg and ((workspace and s.get("pid") and env_of(s["pid"], "HERDR_WORKSPACE_ID") == workspace)
                                                   or ours & peers_of(s.get("sessionId"), s["cwd"]))):
