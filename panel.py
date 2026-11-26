@@ -591,14 +591,20 @@ class Model:
 
         def go():
             try:
-                out = subprocess.run(["claude", "-p", "/context", "--resume", self.sid, "--fork-session", "--no-session-persistence", "--output-format", "json"],
-                                     capture_output=True, text=True, timeout=90, cwd=self.sess["cwd"]).stdout
+                cmd = ["claude", "-p", "/context", "--resume", self.sid, "--fork-session", "--no-session-persistence", "--output-format", "json"]
+                r_ = subprocess.run(cmd, capture_output=True, text=True, timeout=90, cwd=self.sess["cwd"])
+                out = r_.stdout
+                if "Code Mode" in out + r_.stderr:  # 会话是开着实验性 Code Mode 起的: -p 不认 settings.json 里的这个 env, 要从 --settings 再给一次才能 resume
+                    out = subprocess.run(cmd + ["--settings", '{"env":{"CLAUDE_CODE_EXPERIMENTAL_CODE_MODE":"1"}}'],
+                                         capture_output=True, text=True, timeout=90, cwd=self.sess["cwd"]).stdout
+                if not out.lstrip().startswith("{"):  # 不是 JSON 就把 claude 自己的话报出来, 别报 "Expecting value"
+                    raise RuntimeError((out + r_.stderr).strip()[:120] or "no output")
                 self.usage.update(data=parse_usage(json.loads(out)["result"]), ts=time.time())
                 with open(usage_cache(self.sid), "w") as f:
                     json.dump({"data": self.usage["data"], "ts": self.usage["ts"]}, f)
                 self.say("✓ usage updated")
             except Exception as e:
-                self.say("✗ /context failed: " + str(e)[:40])
+                self.say("✗ /context failed: " + str(e)[:120])
             self.usage["busy"] = False
         threading.Thread(target=go, daemon=True).start()
 
