@@ -18,7 +18,7 @@
 宽度: 拖动改了宽度会记住 (STATE_DIR/width), 下次 toggle 打开沿用; 默认值/是否记忆在配置目录 ($HERDR_PLUGIN_CONFIG_DIR) 的 config.json
 """
 import agents as AG
-import copy, curses, datetime, glob, json, os, re, shlex, shutil, subprocess, sys, textwrap, threading, time, unicodedata
+import copy, curses, datetime, glob, json, os, re, shlex, shutil, subprocess, sys, textwrap, threading, time, tomllib, unicodedata
 from collections import Counter
 
 H = os.environ.get("HERDR_BIN_PATH") or "herdr"
@@ -157,6 +157,44 @@ def find_session():
         if reg.get("sessionId"):
             return next((s for s in sessions if reg.get("parkedJobId") and s.get("id") == reg["parkedJobId"]), reg)
     return None
+
+
+FOREIGN = ("codex", "agy", "gemini")  # 这些 agent 的 pane 也能开面板: 只读地列它们会读的说明文件 / MCP / 插件 / skill, 外加 Agents 页
+
+
+def foreign_snap(agent, cwd, name):
+    """codex / agy(gemini) 的面板快照, 字段和 Claude 会话的一样 (界面不用分支)。
+    ponytail: 只按它们文档里的固定位置去找、不读会话记录, 所以「磁盘上有」≠「这次会话真的加载了」; 开关也没做 (要改它们自己的配置)"""
+    gem = agent != "codex"
+    top = (run("git", "-C", cwd, "rev-parse", "--show-toplevel").strip() or cwd) if os.path.isdir(cwd) else cwd
+    rel = os.path.relpath(cwd, top).split(os.sep) if cwd.startswith(top + "/") else []
+    dirs = [os.path.join(top, *rel[:i]) for i in range(len(rel) + 1)]  # 仓库根 → cwd 一层层往下 (两家都这么找项目说明)
+    conf = {}
+    if not gem:
+        try:
+            with open(os.path.join(HOME, ".codex/config.toml"), "rb") as f:
+                conf = tomllib.load(f)
+        except (OSError, ValueError):
+            pass
+    names = ["GEMINI.md", "AGENTS.md"] if gem else ["AGENTS.override.md", "AGENTS.md"] + list(conf.get("project_doc_fallback_filenames") or [])
+    files = [{"path": p, "type": "User", "loaded": True} for p in [os.path.join(HOME, ".gemini/GEMINI.md" if gem else ".codex/AGENTS.md")] if os.path.isfile(p)]
+    for d in dirs:
+        hit = [os.path.join(d, n) for n in names if os.path.isfile(os.path.join(d, n))]
+        # codex 每层只读第一个存在的 (override > AGENTS.md > 回退名); agy 两个都读
+        files += [{"path": p, "type": "Project", "loaded": gem or i == 0} for i, p in enumerate(hit)]
+    if gem:
+        servers = dict(jload(os.path.join(HOME, ".gemini/settings.json")).get("mcpServers") or {}, **(jload(os.path.join(HOME, ".gemini/config/mcp_config.json")).get("mcpServers") or {}))
+    else:
+        servers = conf.get("mcp_servers") or {}
+    mcp = [dict(name=n, on=v.get("enabled", True) is not False and not v.get("disabled"), scope="user", tools=0, catalog=False, disabled=False) for n, v in sorted(servers.items())]
+    plugins = [dict(id=i, name=i.split("@")[0], on=bool(v.get("enabled", True)), scope="user", inst="user", skills=0, tools=0, off_here=False) for i, v in sorted((conf.get("plugins") or {}).items())]
+    skills = []
+    for label, base in [("project", os.path.join(d, ".agents/skills")) for d in dict.fromkeys([top, cwd])] + [("user", os.path.join(HOME, ".agents/skills"))]:
+        for n in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+            if os.path.isfile(os.path.join(base, n, "SKILL.md")) and n not in {x["name"] for x in skills}:
+                skills.append(dict(name=n, state="on", src=label, path=os.path.join(base, n), local=False, plugin_off=False))
+    return dict(sess={"name": name or agent, "sessionId": "", "cwd": cwd, "kind": agent}, cwd=cwd, msg="", files=files, mcp=mcp, plugins=plugins,
+                skills=sorted(skills, key=lambda x: x["name"].lower()))
 
 
 # ── settings: 低 → 高 = user, project, local; 开关一律写 local (不入库) ──────────────────────────────
@@ -357,6 +395,12 @@ class Model:
     def refresh(self, resolve):
         if resolve or not self.sid:
             s = find_session()
+            if not s and self.agent in FOREIGN and self.pane_cwd:
+                self.sid, self.sess = None, None
+                t = EARLY.get("terminal_title_stripped") or ""  # 和 Agents 卡片同一个名字: 标题还是 shell 提示符 (agy 不改标题) 就用 "agent · pane"
+                self.set(dict(foreign_snap(self.agent, self.pane_cwd, f"{self.agent} · {TARGET}" if not t or re.match(r"^\S+@\S+:", t) else t), agents=self.agents))
+                self.nosess = None
+                return
             if not s:
                 self.set(dict(sess=None, msg="No Claude Code session in this pane"))
                 self.nosess = self.nosess or time.time()
@@ -419,6 +463,8 @@ class Model:
         threading.Thread(target=go, daemon=True).start()
 
     def toggle(self, kind, row):
+        if self.read_only():
+            return
         cwd = self.snap.get("cwd")
         if kind == "mcp":
             name, on = row["name"], row["on"]
@@ -459,9 +505,18 @@ class Model:
             self.stale = True
             self.refresh(False)
 
+    def read_only(self):
+        """codex / agy 的面板只看不改: 开关、删、更新、reload 都是 Claude Code 的命令"""
+        k = (self.snap.get("sess") or {}).get("kind")
+        if k:
+            self.say(f"✗ read-only for {k}: enter opens the file, change its own config to switch things")
+        return bool(k)
+
     def ask_delete(self, kind, row):
         """-> (确认提示, 执行函数) 或 (原因, None); 不能删的 (插件自带的 skill、插件/连接器带的 MCP) 直接说明"""
         cwd = self.snap.get("cwd")
+        if (self.snap.get("sess") or {}).get("kind"):
+            return f"read-only for {self.snap['sess']['kind']}", None
         if kind == "plugin":
             sc = row["inst"]
             return f"Uninstall plugin {row['name']} (installed at {sc} scope, for all projects)? y = yes", lambda: self.cli(["claude", "plugin", "uninstall", row["id"], "--scope", sc], cwd, f"{row['name']} uninstalled · press r to reload")
@@ -477,6 +532,8 @@ class Model:
         return f"Delete skill {row['name']} ({row['src']}: {real.replace(HOME, '~')}) — {how}? y = yes", lambda: self.rm_skill(row)
 
     def update(self, kind, row):
+        if self.read_only():
+            return
         """U: 更新当前插件到最新版 (没加 -y: 市场声明了要执行的命令时让它拒绝, 别替用户点同意); MCP / skill 没有统一的更新入口"""
         if kind != "plugin":
             self.say("✗ Update only works on plugins (MCP servers and skills have no update command)")
@@ -580,6 +637,8 @@ class Model:
         self.say("✓ editing " + os.path.basename(path) if '"type":"ok"' in out.replace(" ", "") else "✗ failed to open the editor")
 
     def reload(self):
+        if self.read_only():
+            return
         self.say("… /reload-plugins")
         self.agent_cmd("/reload-plugins", "✓ reloaded")
 
@@ -645,11 +704,11 @@ def _rows(snap, u, tab, f):
         return [("mcp", r) for r in snap["mcp"] if f in r["name"].lower()]
     if tab == "Skills":
         return [("skill", r) for r in snap["skills"] if f in r["name"].lower()]
-    rows = [("text", x) for x in usage_lines(u)]
+    rows = [("text", x) for x in usage_lines(u)] if not snap["sess"].get("kind") else []  # /context 只有 Claude 会话有
     agents = sorted((r for r in ((u or {}).get("tables", {}).get("Custom Agents") or []) if len(r) >= 3), key=lambda r: -tok(r[-1]))
     rows += [("text", ("", "n")), ("text", (f"Custom agents · {len(agents)}", "h"))] if agents else []
     rows += [("agent", {"name": r[0], "src": r[1], "tok": r[-1], "path": agent_path(r[0], r[1], snap["cwd"])}) for r in agents]
-    rows += [("text", ("", "n")), ("text", (f"Memory files · {len(snap['files'])}", "h"))] if snap["files"] else []
+    rows += [("text", ("", "n"))] * bool(rows) + [("text", (f"Memory files · {len(snap['files'])}", "h"))] if snap["files"] else []
     rows += [("file", r) for r in snap["files"]]
     return [x for x in rows if x[0] == "text" and not f or f in (x[1][0] if x[0] == "text" else x[1].get("name") or x[1].get("path") or "").lower()]
 
